@@ -100,8 +100,9 @@ packages/verticals/*/frontend/dist/
 .worktrees/
 worktrees/
 
-# Claude Code
-.claude/
+# Claude Code (ignore session cache/settings, but keep project-local skills tracked)
+.claude/*
+!.claude/skills/
 
 # Logs
 *.log
