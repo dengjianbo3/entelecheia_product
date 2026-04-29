@@ -1,0 +1,48 @@
+# Strict ruff configuration matching CONTRIBUTING.md §"Quality gates".
+
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+    ".venv",
+    "build",
+    "dist",
+    "**/__pycache__",
+    "apps/frontend/node_modules",
+    "apps/frontend/dist",
+]
+
+[lint]
+select = [
+    "E", "W",      # pycodestyle
+    "F",           # pyflakes
+    "I",           # isort
+    "N",           # pep8-naming
+    "UP",          # pyupgrade
+    "B",           # flake8-bugbear
+    "C4",          # flake8-comprehensions
+    "SIM",         # flake8-simplify
+    "RUF",         # ruff-specific rules
+    "ASYNC",       # async hygiene
+    "S",           # bandit (security)
+    "PTH",         # use pathlib
+    "TID",         # tidy-imports
+    "ARG",         # unused arguments
+    "PL",          # pylint
+    "PERF",        # perflint
+]
+ignore = [
+    "E501",        # line too long — let formatter handle
+    "PLR0913",     # too many arguments — manifests need many fields
+    "PLR2004",     # magic value — sometimes literals are clearer than constants
+    "S101",        # assert in tests is fine
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["S", "PLR", "ARG"]
+"**/conftest.py" = ["S", "ARG"]
+"packages/studio_client/fixtures/**" = ["E"]   # fixture files can be wide
+
+[format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true

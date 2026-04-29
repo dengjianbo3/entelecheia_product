@@ -1,0 +1,108 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+.venv-*/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# uv
+uv.lock
+
+# Testing / coverage
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+htmlcov/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Frontend (apps/frontend/)
+apps/frontend/node_modules/
+apps/frontend/dist/
+apps/frontend/dist-ssr/
+apps/frontend/.vite/
+apps/frontend/coverage/
+apps/frontend/.eslintcache
+apps/frontend/.turbo/
+
+# Vertical frontend builds
+packages/verticals/*/frontend/node_modules/
+packages/verticals/*/frontend/dist/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Product runtime data (must not commit)
+.product_data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploaded files (should be in object storage in real envs; never committed)
+# Anchored with leading slash so we don't accidentally ignore the
+# `packages/platform-features/uploads/` source directory.
+/.uploads/
+/uploads/
+/var/uploads/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Worktrees
+.worktrees/
+worktrees/
+
+# Claude Code
+.claude/
+
+# Logs
+*.log
+logs/
