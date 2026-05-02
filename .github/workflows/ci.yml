@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     # Doc-only / config-only pushes do not trigger CI. Spec-writing during the
