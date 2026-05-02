@@ -1,15 +1,16 @@
 # 01b — Product-side derivations spec
 
-> **Status**: v0.1 contract for the four product-side reducers that consume studio's `MeetingEvent` stream and produce UI state.
-> **Lives at**: `packages/platform-shell/` (shared meeting-stream store) + `packages/platform-features/agora/` (the four reducers).
+> **Status**: v0.1 contract for the four product-side reducers that consume studio's `MeetingEvent` stream and produce UI state. **Frontend stack**: React 18 + TypeScript + Zustand.
+> **Lives at**: `packages/platform-shell/` (shared meeting-stream registry + hook) + `packages/platform-features/agora/` (the four reducer hooks).
 > **Upstream contract**: [`01-studio-client-spec.md`](./01-studio-client-spec.md) §6 (MeetingEvent), §7.8 (subscribe_meeting), §5.1 (MeetingOutcome).
 > **Referenced from**: `01-studio-client-spec.md` §11.5 / §11.6 / §11.7 / §15 Batch C.
+> **Supersedes**: the Vue/Pinia version of this spec (committed in `ba293e0`); React migration per session decision 2026-05-03.
 
 ---
 
 ## Mission
 
-This file defines the four product-side reducers — `useOutcomeReducer`, `useDagState`, `useCostState`, `useProvenance` — and the shared `useMeetingStreamStore` they sit on top of, so that agora (and any other feature that consumes a meeting's live state) can render working consensus, the live deliberation DAG, live cost, and on-demand provenance from studio's raw 24-EventType stream **without re-implementing the reduction logic anywhere else**.
+This file defines the four product-side reducers — `useOutcomeReducer`, `useDagState`, `useCostState`, `useProvenance` — and the shared `useMeetingStreamRegistry` Zustand store + `useMeetingStream` hook they sit on top of, so that agora (and any other feature that consumes a meeting's live state) can render working consensus, the live deliberation DAG, live cost, and on-demand provenance from studio's raw 24-EventType stream **without re-implementing the reduction logic anywhere else**.
 
 **Hard rule**: these reducers are PRODUCT-SIDE derivations. Studio does not provide pre-derived working outcome / DAG / provenance / live cost. Every transformation here happens in product code, fed by `StudioClient.subscribe_meeting`'s yielded events.
 
@@ -18,17 +19,18 @@ This file defines the four product-side reducers — `useOutcomeReducer`, `useDa
 ## Scope
 
 **Covers.**
-- The shared `useMeetingStreamStore(meeting_id)` Pinia store: SSE subscription lifecycle, event log retention, reconnect with `Last-Event-Id`, status surfacing.
-- Four composables that read from the store and produce reactive UI state:
+- The shared `useMeetingStreamRegistry` Zustand store: per-meeting state in a keyed `Map`, SSE subscription lifecycle, event log retention, reconnect with `Last-Event-Id`, status surfacing.
+- The companion `useMeetingStream(meeting_id)` React hook: per-component subscription via `useEffect`, refcount-based subscribe/unsubscribe, returns the keyed slice + control actions.
+- Four React hooks that read from the registry and produce reactive UI state:
   - `useOutcomeReducer(meeting_id)` → `WorkingConsensus`
   - `useDagState(meeting_id)` → `DagSnapshot`
   - `useCostState(meeting_id)` → `LiveCost`
   - `useProvenance(meeting_id, claim_id)` → `ProvenanceTrace` (on-demand)
-- For each: input event subset (which `event_type`s it consumes), state-machine transitions, output state shape (TS interface), idempotency guarantee, reconnect / late-join / replay semantics, lifecycle (subscribe / dispose / reset), test matrix.
-- Cross-cutting: subscription sharing across reducers, error handling, in-memory log retention, finalization handling.
+- For each: input event subset (which `event_type`s it consumes), state-machine transitions, output state shape (TS interface), idempotency guarantee, reconnect / late-join / replay semantics, lifecycle (mount / unmount / `meeting_id` change), test matrix.
+- Cross-cutting: subscription sharing across hooks, error handling, in-memory log retention, finalization handling.
 
 **Does not cover.**
-- Component-tree wiring (which Vue component reads which reducer) — that's `05-feature-agora-spec.md`.
+- Component-tree wiring (which React component reads which hook) — that's `05-feature-agora-spec.md`.
 - The `StudioClient.subscribe_meeting` Protocol method itself (signature, raises, `Last-Event-Id` semantics) — that's `01-studio-client-spec.md` §7.8.
 - The 24+2 `EventType` literal list, `MeetingEvent` shape, or `MeetingOutcome` shape — those mirror studio §6 / §5.1 and live in `01-studio-client-spec.md` §6 / §5.
 - Backend (`apps/api`) SSE proxying — that's `15-apps-api-spec.md`.
@@ -58,15 +60,16 @@ If any payload field referenced below ever changes, the change must originate in
 
 ---
 
-## §2 Common pattern: `useMeetingStreamStore`
+## §2 Common pattern: `useMeetingStreamRegistry` (Zustand) + `useMeetingStream` (hook)
 
-The four reducers do not each open their own SSE subscription. **One subscription per meeting**, shared. The store is a Pinia instance keyed by `meeting_id`.
+The four reducer hooks do not each open their own SSE subscription. **One subscription per meeting**, shared across all hooks consuming it. The subscription state lives in a single global Zustand store keyed by `meeting_id`; a thin React hook (`useMeetingStream`) handles per-component subscribe/unsubscribe lifecycle via refcount.
 
 ### 2.1 Module location
 
-`packages/platform-shell/src/composables/useMeetingStreamStore.ts`
+- Zustand store: `packages/platform-shell/src/stores/useMeetingStreamRegistry.ts`
+- React hook:    `packages/platform-shell/src/hooks/useMeetingStream.ts`
 
-(Lives in **shell** because chathub also consumes meeting streams; the store is not agora-specific. Reducers themselves are in agora.)
+(Lives in **shell** because chathub also consumes meeting streams; the registry is not agora-specific. Reducer hooks themselves are in agora.)
 
 ### 2.2 Store state
 
@@ -74,7 +77,7 @@ The four reducers do not each open their own SSE subscription. **One subscriptio
 import type { MeetingEvent, MeetingOutcome, ErrorBody } from "@entelecheia/studio-client";
 
 export type StreamStatus =
-  | "idle"             // before subscribe
+  | "idle"             // before any subscribe
   | "subscribing"      // SSE handshake in progress
   | "live"             // receiving events
   | "completed"        // meeting_finalized seen, iterator ended
@@ -86,77 +89,160 @@ export interface MeetingStreamState {
   meeting_id:           string;
   status:               StreamStatus;
   events:               MeetingEvent[];        // append-only log; full retention for the meeting's lifetime
-  last_event_id:        number;                // highest event_id seen; used for reconnect cursor
+  last_event_id:        number;                // highest event_id seen; reconnect cursor
   last_error:           string | null;         // human-readable; populated on failure modes
   finalized_outcome:    MeetingOutcome | null; // set when status === "completed"
   failure_reason:       ErrorBody | null;      // set when status === "failed"
-  subscriber_count:     number;                // ref count; auto-unsubscribe at 0
+  subscriber_count:     number;                // refcount; auto-unsubscribe at 0
   subscribed_at:        string | null;         // ISO-8601 of last subscribe
 }
-```
 
-### 2.3 Store actions
+export interface MeetingStreamRegistryState {
+  // Per-meeting state, keyed by meeting_id. Map (not Record) for cheap iteration + clear().
+  streams: Map<string, MeetingStreamState>;
 
-```typescript
-export interface MeetingStreamStore {
-  // State (reactive refs)
-  state:                Ref<MeetingStreamState>;
-
-  // Lifecycle — all idempotent
-  subscribe():          Promise<void>;        // increments subscriber_count; ensures live subscription
-  unsubscribe():        Promise<void>;        // decrements subscriber_count; closes subscription if 0
-  reconnect():          Promise<void>;        // re-subscribes from last_event_id; called on transient drops
-  reset():              void;                 // wipes events log + state; used when meeting_id changes
-  forceFullReload():    Promise<void>;        // re-subscribes from event_id=0; used on "lost" → recovery
+  // Lifecycle actions. All take meeting_id since the store is one global instance.
+  subscribe(meeting_id: string):       Promise<void>;
+  unsubscribe(meeting_id: string):     Promise<void>;
+  reconnect(meeting_id: string):       Promise<void>;
+  reset(meeting_id: string):           void;
+  forceFullReload(meeting_id: string): Promise<void>;
 }
 ```
 
-### 2.4 Behavior contract
+### 2.3 Store implementation pattern
 
-- **Single subscription per `meeting_id`.** Pinia store is keyed by `meeting_id`; multiple components calling `useMeetingStreamStore("mtg_abc")` get the same instance.
-- **Reference counting.** First `subscribe()` opens the SSE; last `unsubscribe()` closes it. Reducers always pair `subscribe()` with `unsubscribe()` in their lifecycle hooks.
-- **Append-only event log.** Every received event is pushed to `state.events` in `event_id` order. Reducers watch this array reactively.
-- **Reconnect on transient drop.** When the underlying `subscribe_meeting` AsyncIterator throws `StudioUnavailable` (network blip), the store transitions to `"disconnected"`, waits with exponential backoff (1s / 2s / 4s / 8s, max 30s), then calls `reconnect()` with `last_event_id = state.last_event_id`. Studio's `Last-Event-Id` semantics (per `01-studio-client-spec.md` §7.8 + studio §6.3) ensure no duplicates and no gaps.
+```typescript
+import { create } from "zustand";
+
+export const useMeetingStreamRegistry = create<MeetingStreamRegistryState>((set, get) => ({
+  streams: new Map(),
+
+  async subscribe(meeting_id: string) {
+    const cur = get().streams.get(meeting_id);
+    if (cur) {
+      // Already exists; bump refcount only.
+      set(state => {
+        const m = new Map(state.streams);
+        m.set(meeting_id, { ...cur, subscriber_count: cur.subscriber_count + 1 });
+        return { streams: m };
+      });
+      return;
+    }
+    // First subscriber: initialize state + open SSE.
+    set(state => {
+      const m = new Map(state.streams);
+      m.set(meeting_id, {
+        meeting_id, status: "subscribing", events: [], last_event_id: 0,
+        last_error: null, finalized_outcome: null, failure_reason: null,
+        subscriber_count: 1, subscribed_at: new Date().toISOString(),
+      });
+      return { streams: m };
+    });
+    // ... open subscription via studio-client; iterate events; update state via set()
+  },
+
+  async unsubscribe(meeting_id: string) {
+    const cur = get().streams.get(meeting_id);
+    if (!cur) return;
+    if (cur.subscriber_count > 1) {
+      set(state => {
+        const m = new Map(state.streams);
+        m.set(meeting_id, { ...cur, subscriber_count: cur.subscriber_count - 1 });
+        return { streams: m };
+      });
+      return;
+    }
+    // Last subscriber: close SSE; KEEP state cached for re-subscribe (don't delete from Map).
+    // ... close subscription; subscriber_count = 0
+  },
+
+  // ... reconnect, reset, forceFullReload similarly take meeting_id arg
+}));
+```
+
+### 2.4 The `useMeetingStream` React hook
+
+```typescript
+import { useEffect } from "react";
+import { useMeetingStreamRegistry } from "../stores/useMeetingStreamRegistry";
+
+export interface UseMeetingStreamReturn {
+  state:           MeetingStreamState | undefined;     // undefined before first subscribe completes
+  reconnect:       () => Promise<void>;
+  reset:           () => void;
+  forceFullReload: () => Promise<void>;
+}
+
+export function useMeetingStream(meeting_id: string): UseMeetingStreamReturn {
+  // Subscribe to the keyed slice. Zustand re-renders this hook only when this slice changes.
+  const state = useMeetingStreamRegistry(s => s.streams.get(meeting_id));
+
+  useEffect(() => {
+    useMeetingStreamRegistry.getState().subscribe(meeting_id);
+    return () => {
+      useMeetingStreamRegistry.getState().unsubscribe(meeting_id);
+    };
+  }, [meeting_id]);
+
+  return {
+    state,
+    reconnect:       () => useMeetingStreamRegistry.getState().reconnect(meeting_id),
+    reset:           () => useMeetingStreamRegistry.getState().reset(meeting_id),
+    forceFullReload: () => useMeetingStreamRegistry.getState().forceFullReload(meeting_id),
+  };
+}
+```
+
+### 2.5 Behavior contract
+
+- **Single subscription per `meeting_id`.** Zustand store is one global instance keyed by `meeting_id`; multiple components calling `useMeetingStream("mtg_abc")` share the same underlying SSE.
+- **Reference counting.** First `subscribe()` opens the SSE; last `unsubscribe()` closes it. The `useEffect` cleanup in `useMeetingStream` pairs subscribe+unsubscribe by component lifecycle.
+- **Append-only event log.** Every received event is pushed to `state.events` in `event_id` order. Reducer hooks read from this array via Zustand selectors.
+- **Reconnect on transient drop.** When the underlying `subscribe_meeting` AsyncIterator throws `StudioUnavailable` (network blip), the store transitions to `"disconnected"`, waits with exponential backoff (1s / 2s / 4s / 8s, max 30s), then internally retries with `last_event_id = state.last_event_id`. Studio's `Last-Event-Id` semantics (per `01-studio-client-spec.md` §7.8 + studio §6.3) ensure no duplicates and no gaps.
 - **Termination.** On `meeting_finalized`, transition to `"completed"`; populate `finalized_outcome` from the event payload. On `meeting_failed`, transition to `"failed"`; populate `failure_reason`. In both cases, close the subscription.
-- **Lost cursor.** If `reconnect()` raises `StreamUnavailable` (studio's archive evicted our cursor — should be very rare), transition to `"lost"`; UI surfaces "Stream lost — refresh to recover", and `forceFullReload()` is the recovery action (subscribes from event_id=0, then drops every reducer's state via `reset()` + replay).
-- **Late join is identical to subscribe.** A reducer mounted mid-meeting calls `subscribe()`; the store is already live; the reducer reads `state.events` (already populated with all past events) and folds them. No special "catch-up" code path.
+- **Lost cursor.** If reconnect raises `StreamUnavailable` (studio's archive evicted our cursor — should be very rare), transition to `"lost"`; UI surfaces "Stream lost — refresh to recover", and `forceFullReload()` is the recovery action (subscribes from event_id=0, then drops every reducer's state via per-reducer reset + replay).
+- **Late join is identical to subscribe.** A reducer mounted mid-meeting calls into `useMeetingStream`; the registry is already live for that meeting; the reducer reads `state.events` (already populated with all past events) and folds them. No special "catch-up" code path.
 
-### 2.5 Test matrix (substitution-eligible — runs against PseudoStudioClient + future HttpStudioClient)
+### 2.6 Test matrix (substitution-eligible — runs against PseudoStudioClient + future HttpStudioClient)
 
 | scenario | input | expected | test_id |
 |---|---|---|---|
-| first subscribe, live meeting | `subscribe()` on running meeting | status: `live`, events fill incrementally | `[SUB] t_mss_first_subscribe_live` |
-| first subscribe, completed meeting | `subscribe()` on completed meeting | events fill from id=0, ends with `meeting_finalized`, status: `completed` | `[SUB] t_mss_first_subscribe_completed` |
-| late join | second component calls `subscribe()` after first has been live for N events | second sees the same `state.events` (no double-subscribe to studio) | `[SUB] t_mss_late_join` |
+| first subscribe, live meeting | `useMeetingStream("m_live")` mounted | status: `subscribing` → `live`; events fill incrementally | `[SUB] t_mss_first_subscribe_live` |
+| first subscribe, completed meeting | `useMeetingStream("m_done")` | events fill from id=0, ends with `meeting_finalized`, status: `completed` | `[SUB] t_mss_first_subscribe_completed` |
+| late join | second component mounts `useMeetingStream("m_live")` after first has been live for N events | second sees the same `state.events` (no double-subscribe to studio) | `[SUB] t_mss_late_join` |
 | transient drop | studio drops connection mid-stream | status: `disconnected` → backoff → `live`; no duplicate events | `[SUB] t_mss_transient_drop` |
 | meeting finalizes | `meeting_finalized` arrives | status: `completed`, `finalized_outcome` populated, no further events accepted | `[SUB] t_mss_finalized` |
 | meeting fails | `meeting_failed` arrives | status: `failed`, `failure_reason` populated | `[SUB] t_mss_failed` |
 | cursor lost | reconnect raises `StreamUnavailable` | status: `lost`; `forceFullReload()` recovers | `[SUB] t_mss_cursor_lost` |
-| ref-count auto-unsubscribe | last subscriber unsubscribes | underlying subscription closed; store keeps state for re-subscribe | `[SUB] t_mss_refcount_close` |
-| meeting_id change | component remounts with different `meeting_id` | old store ref-counted down; new store created | `[SUB] t_mss_meeting_id_change` |
+| refcount auto-unsubscribe | last subscriber unmounts | underlying subscription closed; registry keeps state for re-subscribe | `[SUB] t_mss_refcount_close` |
+| meeting_id change | component prop changes from `"m1"` to `"m2"` | useEffect cleanup unsubs from m1; new useEffect subs to m2; old slice untouched (other consumers may still hold it) | `[SUB] t_mss_meeting_id_change` |
 
 ---
 
-## §3 Reducer 1 — `useOutcomeReducer`
+## §3 Reducer hook 1 — `useOutcomeReducer`
 
 Folds the deliberation event stream into a "working consensus" view: which claims are on the table, which are contested, which are agreed, plus contradictions raised. When `meeting_finalized` arrives, also exposes the authoritative `MeetingOutcome` from studio.
 
 ### 3.1 Module location
 
-`packages/platform-features/agora/src/composables/useOutcomeReducer.ts`
+`packages/platform-features/agora/src/hooks/useOutcomeReducer.ts`
 
-### 3.2 Composable signature
+### 3.2 Hook signature
 
 ```typescript
-import type { Ref, ComputedRef } from "vue";
+import { useState, useEffect, useRef } from "react";
+import type { MeetingOutcome } from "@entelecheia/studio-client";
 
-export function useOutcomeReducer(meeting_id: string): {
-  consensus:        ComputedRef<WorkingConsensus>;
-  is_finalized:     ComputedRef<boolean>;
-  finalized:        ComputedRef<MeetingOutcome | null>;
-  is_loading:       ComputedRef<boolean>;        // true while initial replay is in progress
-  error:            ComputedRef<string | null>;  // surfaces underlying stream errors
-};
+export interface UseOutcomeReducerReturn {
+  consensus:     WorkingConsensus;
+  is_finalized:  boolean;
+  finalized:     MeetingOutcome | null;
+  is_loading:    boolean;          // true while initial replay of cached events is in progress
+  error:         string | null;    // surfaces underlying stream errors
+}
+
+export function useOutcomeReducer(meeting_id: string): UseOutcomeReducerReturn;
 ```
 
 ### 3.3 Input event subset (6 of 26)
@@ -210,7 +296,7 @@ export interface WorkingConsensus {
 
 ### 3.5 State machine
 
-For each `event` arriving from `useMeetingStreamStore.state.events`, in `event_id` order:
+For each `event` arriving from `useMeetingStream(meeting_id).state.events`, in `event_id` order:
 
 ```
 match event.event_type:
@@ -228,14 +314,14 @@ match event.event_type:
         last_modified_event_id: event.event_id,
       })
     else:
-      no-op  # claims are immutable on content/asserted_by; idempotent re-receive
+      no-op  // claims are immutable on content/asserted_by; idempotent re-receive
 
   case "ChallengeRaised":
     target_id = event.data.claim_id
     by = event.data.by
     if target_id in claims:
       c = claims[target_id]
-      c.state = "contested"  # only if not already "agreed"; "agreed" wins (see 3.7)
+      c.state = "contested"  // only if not already "agreed"; "agreed" wins (see 3.7)
       if by not in c.contestants:
         c.contestants.append(by)
       c.challenges.append(ChallengeRecord{event_id, by, content: event.data.content ?? null})
@@ -250,7 +336,7 @@ match event.event_type:
   case "ConsensusReached":
     for cid in event.data.claim_ids:
       if cid in claims:
-        claims[cid].state = "agreed"  # terminal; not overridden by later challenges
+        claims[cid].state = "agreed"  // terminal; not overridden by later challenges
         claims[cid].last_modified_event_id = event.event_id
 
   case "ContradictionFound":
@@ -262,7 +348,7 @@ match event.event_type:
 
   case "meeting_finalized":
     is_finalized = true
-    finalized = event.data.outcome  # OutcomeResponse → .outcome → MeetingOutcome
+    finalized = event.data.outcome  // OutcomeResponse → .outcome → MeetingOutcome
 
   case _:
     no-op
@@ -287,27 +373,51 @@ When event ordering surfaces ambiguity:
 
 ### 3.8 Reconnect / replay rule
 
-The reducer reads from `useMeetingStreamStore.state.events` (a reactive append-only array). When the store reconnects:
+The hook reads from `useMeetingStream(meeting_id).state.events`. When the registry reconnects:
 - New events arrive in the array (with `event_id > state.last_event_id`).
-- The reducer's `watch` re-runs; folds new events.
+- The hook's `useEffect` re-runs (deps include `state.events`); folds new events incrementally via `useState` setter.
 - No state reset.
 
-When the store transitions to `"lost"` and `forceFullReload()` is called:
-- `reset()` is called on every reducer.
+When the registry transitions to `"lost"` and `forceFullReload()` is called:
+- The reducer's internal state IS reset (via the meeting_id-keyed reset effect — see 3.9).
 - `state.events` becomes empty, then refills from `event_id=0`.
-- Reducer's `watch` re-runs from scratch.
+- The fold useEffect re-runs from scratch.
 
-### 3.9 Lifecycle
+### 3.9 Lifecycle (React)
 
 ```typescript
-// Inside useOutcomeReducer:
-const stream = useMeetingStreamStore(meeting_id);
-onMounted(async () => { await stream.subscribe(); });
-onUnmounted(async () => { await stream.unsubscribe(); });
-watch(() => stream.state.value.events, (newEvents) => {
-  // fold from last_event_id + 1
-}, { deep: false, flush: "post" });
+export function useOutcomeReducer(meeting_id: string): UseOutcomeReducerReturn {
+  const { state } = useMeetingStream(meeting_id);
+
+  const [consensus, setConsensus] = useState<WorkingConsensus>(() => initialConsensus(meeting_id));
+  const lastProcessedRef = useRef<number>(0);
+
+  // Reset on meeting_id change.
+  useEffect(() => {
+    setConsensus(initialConsensus(meeting_id));
+    lastProcessedRef.current = 0;
+  }, [meeting_id]);
+
+  // Fold new events incrementally.
+  useEffect(() => {
+    const events = state?.events ?? [];
+    if (events.length <= lastProcessedRef.current) return;
+    const newEvents = events.slice(lastProcessedRef.current);
+    setConsensus(prev => foldOutcomeEvents(prev, newEvents));
+    lastProcessedRef.current = events.length;
+  }, [state?.events]);
+
+  return {
+    consensus,
+    is_finalized: consensus.last_event_id > 0 && state?.status === "completed",
+    finalized:    state?.finalized_outcome ?? null,
+    is_loading:   state?.status === "subscribing" || state == null,
+    error:        state?.last_error ?? null,
+  };
+}
 ```
+
+`foldOutcomeEvents(prev, newEvents)` is a pure function implementing §3.5's state machine. Pure-function isolation enables straightforward unit testing without React.
 
 ### 3.10 Test matrix
 
@@ -322,29 +432,32 @@ watch(() => stream.state.value.events, (newEvents) => {
 | contradiction | `ContradictionFound{content:"X"}` | `contradictions` len 1 | `t_or_contradiction` |
 | meeting finalized | … → `meeting_finalized{outcome: …}` | `is_finalized = true`, `finalized` populated | `t_or_finalized` |
 | idempotent replay | apply same event sequence twice | identical final state | `t_or_idempotent` |
-| late mount | mount reducer after 50 events have streamed | reducer folds all 50 from `state.events` on first watch | `t_or_late_mount` |
-| reconnect | drop stream after event 30, reconnect, more events arrive | reducer folds events 31+ without resetting | `t_or_reconnect` |
-| lost cursor recovery | `forceFullReload()` called | reducer state resets, refolds from event_id=0 | `t_or_lost_recovery` |
+| late mount | mount hook after 50 events have streamed | first useEffect tick folds all 50 from `state.events` | `t_or_late_mount` |
+| reconnect | drop stream after event 30, reconnect, more events arrive | hook folds events 31+ without resetting | `t_or_reconnect` |
+| lost cursor recovery | `forceFullReload()` called | reducer state resets (via meeting_id-keyed effect chain), refolds from event_id=0 | `t_or_lost_recovery` |
+| meeting_id change resets | hook re-rendered with different `meeting_id` | consensus resets to initial; fold runs against new meeting's events | `t_or_meeting_id_change` |
 | unrelated events ignored | `MessageEmitted`, `ToolCalled`, etc. interleaved | no effect on `consensus` | `t_or_ignores_unrelated` |
 
 ---
 
-## §4 Reducer 2 — `useDagState`
+## §4 Reducer hook 2 — `useDagState`
 
 Folds the same event stream into a directed graph for the DAG visualizer. Nodes represent claims, agents, evidence references, and triggers; edges represent assertions, challenges, citations, contradictions, and supports.
 
 ### 4.1 Module location
 
-`packages/platform-features/agora/src/composables/useDagState.ts`
+`packages/platform-features/agora/src/hooks/useDagState.ts`
 
-### 4.2 Composable signature
+### 4.2 Hook signature
 
 ```typescript
-export function useDagState(meeting_id: string): {
-  dag:           ComputedRef<DagSnapshot>;
-  is_loading:    ComputedRef<boolean>;
-  error:         ComputedRef<string | null>;
-};
+export interface UseDagStateReturn {
+  dag:          DagSnapshot;
+  is_loading:   boolean;
+  error:        string | null;
+}
+
+export function useDagState(meeting_id: string): UseDagStateReturn;
 ```
 
 ### 4.3 Input event subset (6 of 26)
@@ -405,7 +518,7 @@ match event.event_type:
                 source_event_id=event.event_id)
     upsert_node(id="agent:{cm.asserted_by}", kind="agent",
                 label=cm.asserted_by, state=null,
-                source_event_id=event.event_id)  # no-op if exists
+                source_event_id=event.event_id)  // no-op if exists
     upsert_edge(id="agent:{cm.asserted_by}|asserts|claim:{cm.claim_id}",
                 source="agent:{cm.asserted_by}", target="claim:{cm.claim_id}",
                 kind="asserts", source_event_id=event.event_id)
@@ -478,7 +591,7 @@ Same event applied twice = same snapshot. Achieved by deterministic IDs (4.6) + 
 
 ### 4.8 Reconnect / replay / lifecycle
 
-Identical to §3.8–§3.9. The reducer watches `useMeetingStreamStore.state.events`; reconnect / lost-cursor flows do the same things.
+Identical pattern to §3.8–§3.9. The hook reads from `useMeetingStream(meeting_id).state.events`; useEffect with `[state?.events]` dep folds incrementally; useEffect with `[meeting_id]` dep resets `dag` snapshot via `useState` setter. `useReducer` is an alternative implementation, equivalent semantics.
 
 ### 4.9 Test matrix
 
@@ -493,13 +606,14 @@ Identical to §3.8–§3.9. The reducer watches `useMeetingStreamStore.state.eve
 | trigger | + `TriggerDefined(target_claim_id=c1)` | +1 trigger node, +1 triggers edge | `t_dag_trigger` |
 | contradiction | + `ContradictionFound(c1, c3)` | +1 contradicts edge | `t_dag_contradiction` |
 | consensus | + `ConsensusReached([c1])` | claim state `"agreed"` | `t_dag_consensus` |
-| late mount | reducer mounted mid-meeting | snapshot reflects entire prior history | `t_dag_late_mount` |
+| late mount | hook mounted mid-meeting | snapshot reflects entire prior history | `t_dag_late_mount` |
 | reconnect | drop + reconnect | snapshot identical to never-dropped run | `t_dag_reconnect_identical` |
+| meeting_id change resets | re-render with different `meeting_id` | dag resets; refolds from new meeting's events | `t_dag_meeting_id_change` |
 | ignored events | `MessageEmitted`, `ToolCalled` arrive | no graph mutation | `t_dag_ignores_unrelated` |
 
 ---
 
-## §5 Reducer 3 — `useCostState`
+## §5 Reducer hook 3 — `useCostState`
 
 Two-track cost view:
 
@@ -510,19 +624,25 @@ UI shows both: "12 turns / 4 tools so far · $0.18 (as of 14:23:01)".
 
 ### 5.1 Module location
 
-`packages/platform-features/agora/src/composables/useCostState.ts`
+`packages/platform-features/agora/src/hooks/useCostState.ts`
 
-### 5.2 Composable signature
+### 5.2 Hook signature
 
 ```typescript
-export function useCostState(meeting_id: string, opts?: {
-  poll_interval_ms?:   number;           // default 30_000
-  client?:             StudioClient;      // injected; default = useStudio()
-}): {
-  cost:           ComputedRef<LiveCost>;
-  is_loading:     ComputedRef<boolean>;   // true during initial fetch
-  error:          ComputedRef<string | null>;
-};
+import type { StudioClient } from "@entelecheia/studio-client";
+
+export interface UseCostStateOptions {
+  poll_interval_ms?: number;          // default 30_000
+  client?:           StudioClient;     // injected; default = useStudio()
+}
+
+export interface UseCostStateReturn {
+  cost:        LiveCost;
+  is_loading:  boolean;                // true during initial fetch
+  error:       string | null;
+}
+
+export function useCostState(meeting_id: string, opts?: UseCostStateOptions): UseCostStateReturn;
 ```
 
 ### 5.3 Input event subset (2 of 26 for live count)
@@ -553,20 +673,20 @@ export interface LiveCost {
 
 ### 5.5 Polling rules
 
-- On `subscribe()` (mount): initial `get_cost_report(meeting_id=m)` fetch. Store result.
-- Every `poll_interval_ms` thereafter: re-fetch. Update `authoritative_*` fields.
-- On `meeting_finalized` event: one final `get_cost_report` fetch (typically `total_cost_usd` is now stable). Cancel further polling.
-- On `unsubscribe()` (unmount): cancel polling.
+- On hook mount: initial `get_cost_report(meeting_id=m)` fetch via a `useEffect`.
+- Every `poll_interval_ms` thereafter: re-fetch via a `setInterval` registered in `useEffect`; cleanup clears the interval.
+- On `meeting_finalized` event (detected via `useMeetingStream(meeting_id).state.status === "completed"`): one final `get_cost_report` fetch, then cancel the interval.
+- On hook unmount or `meeting_id` change: cleanup cancels the interval and aborts in-flight fetches via `AbortController`.
 - On poll error (`StudioUnavailable` / `NotFound` / `RateLimited`): set `error`, keep last successful values, retry on next interval. Do NOT raise to caller; the live counter still works.
 
 ### 5.6 Idempotency
 
-Live counters: sum is a function of (set of events seen). Reducer rejects events with `event_id <= last_event_id` (defensive); the reactive watcher only feeds new events.
-Authoritative: each poll overwrites the previous `authoritative_*` snapshot atomically.
+Live counters: sum is a function of (set of events seen). Reducer rejects events with `event_id <= last_event_id` (defensive); the React fold useEffect only feeds new events.
+Authoritative: each poll overwrites the previous `authoritative_*` snapshot atomically (single `setState` call).
 
 ### 5.7 Reconnect / replay
 
-After a stream reconnect, late events flow in normally; counters increment. Polling continues independent of stream state (it's HTTP, not SSE).
+After a stream reconnect, late events flow in normally; counters increment via the standard fold useEffect. Polling continues independent of stream state (it's HTTP, not SSE).
 
 After `forceFullReload`: counter resets to 0; refolds from `event_id=0`. Authoritative fetched anew.
 
@@ -581,37 +701,40 @@ After `forceFullReload`: counter resets to 0; refolds from `event_id=0`. Authori
 | poll error tolerated | poll raises `StudioUnavailable` | `error` set; `authoritative_*` retained from last good poll; counter still increments | `t_cs_poll_error_tolerated` |
 | meeting finalized | `meeting_finalized` arrives | one final poll, `is_finalized: true`, polling stops | `t_cs_finalized` |
 | ignored events | `ClaimMade`, `ChallengeRaised`, etc. | no effect | `t_cs_ignores_unrelated` |
-| concurrent reducers | useOutcomeReducer + useCostState on same meeting | both work; one underlying subscription | `t_cs_concurrent_with_outcome` |
+| concurrent reducer hooks | useOutcomeReducer + useCostState on same meeting | both work; one underlying subscription | `t_cs_concurrent_with_outcome` |
+| unmount cancels poll | hook unmounted mid-interval | no further polls; in-flight fetch aborted | `t_cs_unmount_cancel_poll` |
 
 ---
 
-## §6 Reducer 4 — `useProvenance`
+## §6 Reducer hook 4 — `useProvenance`
 
-On-demand. User clicks an evidence chip in agora → composable assembles a provenance trace for the cited claim from `EvidenceCited` events plus `MeetingOutcome.key_facts` (when meeting is finalized).
+On-demand. User clicks an evidence chip in agora → hook assembles a provenance trace for the cited claim from `EvidenceCited` events plus `MeetingOutcome.key_facts` (when meeting is finalized).
 
 ### 6.1 Module location
 
-`packages/platform-features/agora/src/composables/useProvenance.ts`
+`packages/platform-features/agora/src/hooks/useProvenance.ts`
 
-### 6.2 Composable signature
+### 6.2 Hook signature
 
 ```typescript
-export function useProvenance(meeting_id: string, claim_id: string): {
-  trace:         ComputedRef<ProvenanceTrace | null>;  // null until first computation
-  is_loading:    ComputedRef<boolean>;
-  error:         ComputedRef<string | null>;
-};
+export interface UseProvenanceReturn {
+  trace:        ProvenanceTrace | null;  // null until first computation
+  is_loading:   boolean;
+  error:        string | null;
+}
+
+export function useProvenance(meeting_id: string, claim_id: string): UseProvenanceReturn;
 ```
 
-Unlike the other three reducers, `useProvenance` is **lazy and bounded by `claim_id`**. Mounting it triggers a one-time computation; changes to `claim_id` re-trigger.
+Unlike the other three hooks, `useProvenance` is **lazy and bounded by `claim_id`**. Mounting it triggers a one-time computation; changes to `claim_id` re-trigger.
 
 ### 6.3 Input
 
 | Source | Use |
 |---|---|
-| `useMeetingStreamStore.state.events` | scan for `EvidenceCited` events with `claim_id` matching (or transitively reachable from) the requested claim |
-| `useOutcomeReducer.consensus.value.claims` | (optional) walk claim → claim citations through `evidence_refs` payload field, when `EvidenceCited` references another claim |
-| `useMeetingStreamStore.state.finalized_outcome.key_facts` | when meeting is finalized, supplement with outcome-level evidence (studio-distilled facts) |
+| `useMeetingStream(meeting_id).state.events` | scan for `EvidenceCited` events with `claim_id` matching (or transitively reachable from) the requested claim |
+| `useOutcomeReducer(meeting_id).consensus.claims` | (optional) walk claim → claim citations through `evidence_refs` payload field, when `EvidenceCited` references another claim |
+| `useMeetingStream(meeting_id).state.finalized_outcome.key_facts` | when meeting is finalized, supplement with outcome-level evidence (studio-distilled facts) |
 
 ### 6.4 Output state
 
@@ -633,7 +756,7 @@ export interface ProvenanceTrace {
   meeting_id:         string;
   root_claim_id:      string;
   links:              EvidenceLink[];     // depth-first traversal order
-  truncated:          bool;               // true if traversal exceeded depth_cap (default 8)
+  truncated:          boolean;            // true if traversal exceeded depth_cap (default 8)
   loaded_from:        "stream" | "outcome" | "both";
   computed_at_event_id: number;           // last event_id known to the stream when trace was computed
 }
@@ -654,7 +777,7 @@ while queue not empty and len(trace_links) < max_links (default 200):
     truncated = true
     break
 
-  # Stream-side EvidenceCited events for this claim
+  // Stream-side EvidenceCited events for this claim
   for event in stream.events where event.event_type == "EvidenceCited" and event.data.claim_id == cid:
     loaded_from_stream = true
     link = EvidenceLink{
@@ -672,14 +795,14 @@ while queue not empty and len(trace_links) < max_links (default 200):
       visited_claims.add(link.source_claim_id)
       queue.append((link.source_claim_id, depth+1))
 
-  # Outcome-side key_facts (when meeting is finalized)
+  // Outcome-side key_facts (when meeting is finalized)
   if stream.state.status == "completed" and stream.state.finalized_outcome:
     for fact in stream.state.finalized_outcome.key_facts:
       if fact.claim_id == cid and fact.evidence not already in trace_links:
         loaded_from_outcome = true
         for ev in fact.evidence:
           trace_links.append(EvidenceLink{
-            event_id: -1,                # outcome-derived; no event id
+            event_id: -1,                // outcome-derived; no event id
             source_kind: derive_kind(ev),
             ...
           })
@@ -694,22 +817,48 @@ Computing the trace for the same `claim_id` against the same `state.events` and 
 Trace is recomputed when:
 - `claim_id` arg changes (different chip clicked).
 - `meeting_id` arg changes.
-- `state.events.length` increases AND the meeting is still live (catch new evidence) — debounced 500 ms.
+- `state.events.length` increases AND the meeting is still live (catch new evidence) — debounced 500 ms via `useEffect` + `setTimeout` cleanup pattern.
 - `state.finalized_outcome` transitions from `null` to non-null (meeting just finalized; pull in outcome-level evidence).
 
 NOT recomputed on every reducer-state tick — provenance is cheap to compute but not free; debounce + key-changes are the triggers.
 
-### 6.8 Lifecycle
+### 6.8 Lifecycle (React)
 
 ```typescript
-const stream = useMeetingStreamStore(meeting_id);
-onMounted(async () => { await stream.subscribe(); /* may be already subscribed */ });
-onUnmounted(async () => { await stream.unsubscribe(); });
-watch(
-  [() => claim_id, () => stream.state.value.events.length, () => stream.state.value.finalized_outcome],
-  () => recompute(),
-  { flush: "post" }
-);
+export function useProvenance(meeting_id: string, claim_id: string): UseProvenanceReturn {
+  const { state } = useMeetingStream(meeting_id);
+  const [trace, setTrace] = useState<ProvenanceTrace | null>(null);
+  const [is_loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setTrace(null);
+    setError(null);
+    if (!state) return;
+
+    setLoading(true);
+    const handle = setTimeout(() => {
+      try {
+        const computed = computeProvenance(meeting_id, claim_id, state.events, state.finalized_outcome);
+        setTrace(computed);
+        setError(null);
+      } catch (e) {
+        setError(formatError(e));
+      } finally {
+        setLoading(false);
+      }
+    }, 500);  // debounce window
+
+    return () => clearTimeout(handle);
+  }, [
+    meeting_id,
+    claim_id,
+    state?.events.length,                 // recompute as new evidence arrives
+    state?.finalized_outcome,             // recompute when meeting finalizes
+  ]);
+
+  return { trace, is_loading, error };
+}
 ```
 
 ### 6.9 Test matrix
@@ -724,7 +873,7 @@ watch(
 | depth cap | chain length 10 with depth_cap 8 | `truncated: true`, `links.len = 8 worth` | `t_pv_truncated` |
 | outcome supplements | meeting finalized, key_facts add evidence | `loaded_from: "both"`, extra links with `event_id: -1` | `t_pv_outcome_merge` |
 | recompute on new evidence | new `EvidenceCited` arrives mid-trace | trace re-derives after debounce | `t_pv_recompute_on_new_evidence` |
-| claim_id change | composable arg changes | trace re-derives for new claim | `t_pv_arg_change` |
+| claim_id change | hook arg changes | trace re-derives for new claim | `t_pv_arg_change` |
 
 ---
 
@@ -732,11 +881,11 @@ watch(
 
 ### 7.1 Single subscription per meeting
 
-All four reducers + `useMeetingStreamStore`'s subscriber count guarantee exactly one SSE subscription per `meeting_id`, regardless of how many components consume reducers. Verified by `t_mss_late_join` and `t_cs_concurrent_with_outcome`.
+All four reducer hooks + `useMeetingStream`'s refcount in the registry guarantee exactly one SSE subscription per `meeting_id`, regardless of how many components consume reducers. Verified by `t_mss_late_join` and `t_cs_concurrent_with_outcome`.
 
 ### 7.2 Event log retention
 
-`state.events` retains the full meeting log in memory. For v0.1 with bounded meeting sizes (30 s – 180 min, expected <10K events, <10 MB JSON), this is acceptable. v0.2 considerations:
+`state.events` retains the full meeting log in memory (Map-keyed in the registry). For v0.1 with bounded meeting sizes (30 s – 180 min, expected <10K events, <10 MB JSON), this is acceptable. v0.2 considerations:
 - Sliding window with on-demand re-fetch from studio JSONL.
 - IndexedDB persistence for cross-tab / page-reload survival.
 
@@ -744,13 +893,13 @@ Both are out of scope for v0.1.
 
 ### 7.3 Backpressure
 
-SSE is push-based; the consumer cannot slow the producer. Strategy: store the entire log (7.2). If a consumer's reducer is slow, the reactive watcher batches updates (`flush: "post"`); consumers read batched snapshots, not individual events. No per-event `await` allowed in any reducer's body.
+SSE is push-based; the consumer cannot slow the producer. Strategy: store the entire log (7.2). React's batched updates + React 18's automatic batching mean rapid event arrivals get coalesced into one re-render. No per-event blocking work allowed in any reducer fold function — they MUST be pure synchronous transformations.
 
 ### 7.4 Error surfacing
 
-Each reducer exposes an `error: ComputedRef<string | null>` derived from `useMeetingStreamStore.state.last_error`. UI components show an error banner; reducer state remains valid (last successfully folded snapshot).
+Each hook exposes an `error: string | null` derived from `useMeetingStream(meeting_id).state.last_error`. UI components show an error banner; reducer state remains valid (last successfully folded snapshot).
 
-`useCostState` additionally has its own `error` for poll failures; live count is unaffected (7.6 of §5).
+`useCostState` additionally has its own `error` for poll failures; live count is unaffected (per §5.5).
 
 ### 7.5 Finalization
 
@@ -763,38 +912,42 @@ When `state.status` transitions to `"completed"`:
 ### 7.6 Failure
 
 When `state.status` transitions to `"failed"`:
-- All reducers expose their last successful snapshots; `error` reflects `state.failure_reason.message`.
+- All hooks expose their last successful snapshots; `error` reflects `state.failure_reason.message`.
 - UI shows "Meeting failed" banner; user can navigate to the meeting status page.
 - No automatic retry — meetings cannot resume after failure in studio v0.1.
 
 ### 7.7 Ordering guarantee
 
-Reducers fold events strictly in `event_id` order. Studio guarantees per-meeting monotonic, gap-free events (`01-studio-client-spec.md` §7.8); the store appends in arrival order, which IS event_id order under that guarantee. Reducers' watchers iterate in array order. Defensive: each reducer rejects events with `event_id <= last_event_id`.
+Hooks fold events strictly in `event_id` order. Studio guarantees per-meeting monotonic, gap-free events (`01-studio-client-spec.md` §7.8); the registry appends in arrival order, which IS event_id order under that guarantee. Each hook's fold useEffect iterates `state.events` in array order. Defensive: each hook rejects events with `event_id <= last_event_id`.
 
 ### 7.8 Reset semantics
 
-`reset()` on each reducer clears the derived state (claims, nodes, edges, counters) but does not touch the store's event log. Triggered by `meeting_id` change (component bound to new meeting) or `forceFullReload()` (lost cursor recovery).
+Reducers reset their derived state on:
+- `meeting_id` prop / arg change → useEffect with `[meeting_id]` dep + `setState(initial)`
+- `forceFullReload()` triggered → registry's reset effect propagates; the events array is wiped; the events-dep useEffect sees a shorter array and treats it as a clean refold (the `lastProcessedRef.current = 0` reset is part of the meeting_id-effect or via a separate version counter)
+
+Reducers do NOT touch the registry's event log; the registry owns retention.
 
 ---
 
 ## §8 i18n
 
-Reducers produce no user-visible strings. Field names (`state: "active" | "contested" | …`) are stable identifiers, not display text. Localization happens in agora components (`05-feature-agora-spec.md`), which map identifiers → localized labels via `packages/platform-shell/i18n/`.
+Reducer hooks produce no user-visible strings. Field names (`state: "active" | "contested" | …`) are stable identifiers, not display text. Localization happens in agora components (`05-feature-agora-spec.md`), which map identifiers → localized labels via `packages/platform-shell/i18n/`.
 
 ---
 
 ## §9 Why this design — consolidated load-bearing decisions
 
-**Why product-side reducers, not studio-side derivations.**
+**Why product-side reducer hooks, not studio-side derivations.**
 Studio's contract (per `01-studio-client-spec.md` §11) does not provide working outcome / DAG / provenance / live cost as first-class endpoints. Asking studio to derive each view per-client would couple the API to UI choices we want to keep flexible (different verticals may render the DAG differently, want different live-cost granularity, etc.). Reducing client-side keeps studio's surface lean and lets product evolve UI independently.
 *Considered and rejected.* **Add `get_working_outcome`, `get_dag_view`, etc. to `StudioClient`** — couples studio to UI cadence; doubles the substitution-test surface; makes vertical-specific UI variations require studio cooperation.
 
-**Why a Pinia store for the stream + composables for reducers, not stores for everything.**
-The stream's subscription + event log is **shared cross-component** (multiple agora panels watch one meeting); Pinia's keyed singletons fit. The reducers' derived state is **per-component** (each `<DagViewer>` instance wants its own reactive snapshot to support multiple views or filters); composables with their own refs fit. Forcing reducers into Pinia would either share state across components that should be independent, OR require a Pinia instance per component — neither is what Pinia is for.
-*Considered and rejected.* **All-Pinia** — unnecessary singleton-ness for derived state. **All-composable** — would force every component to reopen its own subscription.
+**Why a Zustand registry (one global keyed store) for the stream + plain React hooks for reducers.**
+The stream's subscription + event log is **shared cross-component** (multiple agora panels watch one meeting); a single global Zustand store keyed by `meeting_id` fits naturally — Zustand's selector-based subscriptions ensure components only re-render when their slice changes. The reducers' derived state is **per-component** (each `<DagViewer />` instance wants its own reactive snapshot to support multiple views or filters); plain React hooks with `useState` + `useEffect` fit. Forcing reducers into Zustand would either share state across components that should be independent OR require a Zustand instance per component — neither is what Zustand is for.
+*Considered and rejected.* **All-Zustand** — unnecessary global-ness for derived state. **All-hooks (no Zustand)** — would force every component to reopen its own SSE subscription. **React Context for the registry** — Context re-renders ALL consumers on any change; Zustand selectors are fine-grained. **Pinia (Vue) was the prior design** — replaced by Zustand in the React migration; same architectural shape.
 
 **Why one shared event log, not per-reducer event filters.**
-Filtering at the store level means each reducer would describe its event subset upfront; the store would maintain N filtered arrays. Memory cost is real (N copies of overlapping subsets). Easier: store keeps one log; reducers filter on watch (`switch (event_type)`). Watch overhead is negligible vs. SSE inbound rate.
+Filtering at the registry level means each reducer would describe its event subset upfront; the registry would maintain N filtered arrays. Memory cost is real (N copies of overlapping subsets). Easier: registry keeps one log; reducers filter on fold (`switch (event_type)`). Switch overhead is negligible vs. SSE inbound rate.
 *Considered and rejected.* **Per-reducer filtered streams** — extra abstraction with no observable benefit at v0.1 scale.
 
 **Why deterministic node/edge IDs in `useDagState`.**
@@ -813,9 +966,13 @@ Live counter is zero-latency (UI ticks per agent turn — feels alive). Authorit
 Provenance traces can be deep; building one per claim eagerly bloats memory and CPU for views the user never opens. Lazy + per-claim is cheap to recompute (debounce-bounded).
 *Considered and rejected.* **Eager build for every claim on every event** — wasteful.
 
-**Why reducer state lives in agora (not platform-shell), but the stream store lives in shell.**
-Stream: shared across features (chathub also subscribes to single-agent meetings; observability could too). Reducers: agora-specific UI views. Putting reducers in shell would force every other consumer of meeting streams to import agora's reducer assumptions (claim states, DAG kinds) even when they don't render those views.
+**Why reducer hooks live in agora (not platform-shell), but the stream registry lives in shell.**
+Stream: shared across features (chathub also subscribes to single-agent meetings; observability could too). Reducer hooks: agora-specific UI views. Putting reducer hooks in shell would force every other consumer of meeting streams to import agora's hook assumptions (claim states, DAG kinds) even when they don't render those views.
 *Considered and rejected.* **All in shell** — couples non-agora features to agora's UI vocabulary. **All in agora** — prevents chathub from sharing the subscription.
+
+**Why incremental fold via `useState + useEffect` (not derive-on-every-render via `useMemo`).**
+Reducer state for `useOutcomeReducer` and `useDagState` accumulates across N events. Re-running the fold from scratch on every event arrival is O(N) per render — wasteful at 10K events. Incremental fold via `useState` setter + `lastProcessedRef` is O(Δ) per render. For `useProvenance` (bounded depth + max_links + recompute-on-claim-change), full recompute is acceptable and cleaner.
+*Considered and rejected.* **`useMemo` to recompute the full fold on every render** — O(N) per render. **`useReducer` for the fold** — equivalent and acceptable; spec accepts either implementation provided the contract holds.
 
 ---
 
@@ -823,15 +980,15 @@ Stream: shared across features (chathub also subscribes to single-agent meetings
 
 | Spec | Adjustment |
 |---|---|
-| `02-platform-shell-spec.md` | Adds `packages/platform-shell/src/composables/useMeetingStreamStore.ts` to its inventory. Documents the public API (subscribe / unsubscribe / reconnect / reset / forceFullReload). |
-| `05-feature-agora-spec.md` | Imports the four reducer composables; specifies the component → reducer mapping (DiscussionStream → useOutcomeReducer + raw events for utterances; DagViewer → useDagState; CostPanel → useCostState; EvidencePopover/ProvenanceModal → useProvenance). Specifies UI behavior on finalization (working vs. authoritative view). |
-| `06-feature-reports-spec.md` | Renderer reads `OutcomeResponse` directly via `get_meeting_outcome`; does NOT consume reducers (reducers are live-meeting concerns; reports work on finalized data). |
-| `07-feature-knowledge-spec.md` | Knowledge browser uses `list_meetings` + `get_meeting_outcome`; does NOT consume reducers (browses past meetings, no live state). |
-| `08-feature-chathub-spec.md` | Chathub uses `useMeetingStreamStore` directly to surface `MessageEmitted` events (and `ToolCalled` if enabled); does NOT need the four reducers. |
-| `12-feature-observability-spec.md` | Observability uses historical `get_cost_report` queries (its own composables); does NOT use `useCostState` (which is for live meeting cost). |
+| `02-platform-shell-spec.md` | Adds `packages/platform-shell/src/stores/useMeetingStreamRegistry.ts` (Zustand store) + `packages/platform-shell/src/hooks/useMeetingStream.ts` (React hook) to its inventory. Documents the public API (registry actions: subscribe / unsubscribe / reconnect / reset / forceFullReload; hook returns: state + control functions). |
+| `05-feature-agora-spec.md` | Imports the four reducer hooks; specifies the component → hook mapping (DiscussionStream → useOutcomeReducer + raw events for utterances; DagViewer → useDagState; CostPanel → useCostState; EvidencePopover/ProvenanceModal → useProvenance). Specifies UI behavior on finalization (working vs. authoritative view). |
+| `06-feature-reports-spec.md` | Renderer reads `OutcomeResponse` directly via `get_meeting_outcome`; does NOT consume reducer hooks (they are live-meeting concerns; reports work on finalized data). |
+| `07-feature-knowledge-spec.md` | Knowledge browser uses `list_meetings` + `get_meeting_outcome`; does NOT consume reducer hooks (browses past meetings, no live state). |
+| `08-feature-chathub-spec.md` | Chathub uses `useMeetingStream` directly to surface `MessageEmitted` events (and `ToolCalled` if enabled); does NOT need the four reducer hooks. |
+| `12-feature-observability-spec.md` | Observability uses historical `get_cost_report` queries (its own hooks); does NOT use `useCostState` (which is for live meeting cost). |
 | `15-apps-api-spec.md` | `agora_proxy.py` is unaffected; remains an ASGI passthrough of studio's SSE. |
-| `16-apps-frontend-spec.md` | Frontend wiring: Pinia plugin registers `useMeetingStreamStore`; agora composables imported per-component. |
-| `17-substitution-tests-spec.md` | Substitution tests cover all `[SUB]` test_ids in this spec (one row per reducer + the store). Tests run against PseudoStudioClient in v0.1 and against HttpStudioClient when v0.2 lands. |
+| `16-apps-frontend-spec.md` | Frontend wiring: Zustand stores instantiated at module level (Zustand-native, no provider needed); reducer hooks imported per-component. |
+| `17-substitution-tests-spec.md` | Substitution tests cover all `[SUB]` test_ids in this spec (one row per reducer hook + the registry). Tests run against PseudoStudioClient in v0.1 and against HttpStudioClient when v0.2 lands. |
 
 ---
 
@@ -839,17 +996,18 @@ Stream: shared across features (chathub also subscribes to single-agent meetings
 
 - [ ] Mission + Scope present; "out of scope for v0.1" listed (cross-tab, IndexedDB, sliding-window log)
 - [ ] Upstream contract anchor (§1) cites every `01-studio-client-spec.md` section depended on
-- [ ] `useMeetingStreamStore` (§2) has full state shape, action signatures, behavior contract, and test matrix marked `[SUB]`
-- [ ] All four reducers have: module location, composable signature, input event subset (named EventTypes), output state TS interface, state-machine pseudocode, idempotency rule, reconnect/replay rule, lifecycle, test matrix
+- [ ] `useMeetingStreamRegistry` (§2.2–§2.3) declares full state shape + Zustand store implementation skeleton
+- [ ] `useMeetingStream` hook (§2.4) declares signature + useEffect-based refcount lifecycle; test matrix marked `[SUB]`
+- [ ] All four reducer hooks have: module location (`hooks/`), TS hook signature, input event subset (named EventTypes), output state TS interface, state-machine pseudocode, idempotency rule, reconnect/replay rule, React lifecycle (useState + useEffect with explicit dep arrays + cleanup), test matrix
 - [ ] `useOutcomeReducer` (§3) defines conflict-resolution rules (consensus wins over late challenge; first ClaimMade wins on content)
 - [ ] `useDagState` (§4) defines deterministic node/edge ID rules (§4.6) — required for idempotency
-- [ ] `useCostState` (§5) specifies polling cadence + error tolerance + dual-track (live counter + authoritative)
-- [ ] `useProvenance` (§6) specifies depth_cap, max_links, cycle protection, recompute triggers
-- [ ] Cross-cutting (§7) covers subscription sharing, event log retention, backpressure, errors, finalization, failure, ordering, reset
-- [ ] No business / domain / product / agent-role string literal anywhere (only neutral placeholders like `c1`, `a1`, `a2`)
+- [ ] `useCostState` (§5) specifies polling cadence + error tolerance + dual-track (live counter + authoritative) + AbortController on unmount
+- [ ] `useProvenance` (§6) specifies depth_cap, max_links, cycle protection, recompute triggers (with debounce via setTimeout in useEffect cleanup)
+- [ ] Cross-cutting (§7) covers subscription sharing, event log retention, React 18 batching for backpressure, errors, finalization, failure, ordering, reset
+- [ ] No business / domain / product / agent-role string literals anywhere (only neutral placeholders like `c1`, `a1`, `a2`)
 - [ ] No `from entelecheia` / `import entelecheia`
-- [ ] No `dict[str, Any]` / `Record<string, any>` / `unknown` without inline justification
-- [ ] Every non-obvious decision in §9 has Why-this + Considered-and-rejected
+- [ ] No `Record<string, any>` / `unknown` / `any` without inline justification
+- [ ] Every non-obvious decision in §9 has Why-this + Considered-and-rejected (≥ 9 decisions documented including the React/Zustand migration rationale)
 - [ ] Downstream impact (§10) lists every spec that consumes this contract
 - [ ] `bash scripts/check-purity.sh` exits 0
 - [ ] File path matches `docs/specs/v0.1/01b-product-derivations-spec.md`
