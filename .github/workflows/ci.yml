@@ -3,12 +3,55 @@ name: CI
 on:
   push:
     branches: [main]
+    # Doc-only / config-only pushes do not trigger CI. Spec-writing during the
+    # planning phase produces ~1 commit per push under docs/specs/; running the
+    # full quality gate stack on those is wasteful AND (when no source exists
+    # yet to lint) used to fail the run with "no jobs ran" → noisy failure
+    # emails. paths-ignore bypasses the trigger entirely for these paths.
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - ".gitignore"
+      - "LICENSE.PROPRIETARY"
+      - ".claude/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - ".gitignore"
+      - "LICENSE.PROPRIETARY"
+      - ".claude/**"
 
 jobs:
+  # Always-runs job. Guarantees at least one job per CI invocation, which
+  # prevents GitHub Actions' "no jobs ran" → workflow-level failure mode that
+  # bit us 16 times during Day 0 + spec phase. Also pulls scripts/check-purity.sh
+  # into actual CI rather than relying on developers running it locally.
+  scaffolding-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Purity gate (no engine internals; no business words in platform-*; vertical isolation; deprecated 'roundtable' naming)
+        run: bash scripts/check-purity.sh
+
+      - name: Repo invariants
+        run: |
+          test -f pyproject.toml
+          test -f README.md
+          test -f ARCHITECTURE.md
+          test -f CONTRIBUTING.md
+          test -f scripts/check-purity.sh
+
   python-quality-gates:
     runs-on: ubuntu-latest
+    needs: scaffolding-check
+    # Only runs when actual Python source exists in packages/* or apps/*.
+    # During Day 0 + spec phase the workspace dirs are .gitkeep placeholders;
+    # uv sync would fail. Once any package adds its first .py file the job
+    # engages automatically.
+    if: hashFiles('packages/**/*.py', 'apps/**/*.py') != ''
     steps:
       - uses: actions/checkout@v4
 
@@ -35,13 +78,11 @@ jobs:
       - name: Tests
         run: uv run pytest
 
-      - name: Purity gate (no engine internals; no business words in platform-*; vertical isolation)
-        run: bash scripts/check-purity.sh
-
   frontend-quality-gates:
     runs-on: ubuntu-latest
-    # Frontend quality gates run only when frontend code exists. The conditional
-    # keeps Day 0 CI green; once apps/frontend/package.json lands the job runs.
+    needs: scaffolding-check
+    # Only runs when frontend code (apps/frontend/package.json) exists.
+    # During Day 0 + spec phase this is absent.
     if: hashFiles('apps/frontend/package.json') != ''
     defaults:
       run:
