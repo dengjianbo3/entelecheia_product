@@ -1,17 +1,18 @@
 # 02 — `platform-shell` v0.1 spec
 
-> **Status**: v0.1 contract for the platform's shell layer — the always-present scaffolding around features and verticals.
+> **Status**: v0.1 contract for the platform's shell layer — the always-present scaffolding around features and verticals. **Frontend stack**: React 18 + TypeScript + Zustand + React Router v6 + react-i18next + Tailwind.
 > **Lives at**: `packages/platform-shell/`.
-> **Upstream contracts**: `01-studio-client-spec.md` (StudioClient + DTOs), `01b-product-derivations-spec.md` (`useMeetingStreamStore` lives here per §10).
+> **Upstream contracts**: `01-studio-client-spec.md` (StudioClient + DTOs), `01b-product-derivations-spec.md` (`useMeetingStreamRegistry` + `useMeetingStream` live here per §2.1 of 01b).
 > **Consumed by**: every feature in Batch C (`05`–`12`), every vertical in Batch D, the frontend app shell in `16-apps-frontend-spec.md`.
+> **Supersedes**: the Vue/Pinia version of this spec (committed in `80e39c8`); React migration per session decision 2026-05-03.
 
 ---
 
 ## Mission
 
-This file defines the platform shell — the always-present application scaffolding (layout, router, theming, i18n, multi-vertical switcher, public composables, vertical extension surface) that every product user sees regardless of which vertical pack is active. The shell is the host; features plug in as panels, verticals plug in via manifest. Removing any vertical or feature does not affect the shell; the shell does not know what specific verticals or features exist.
+This file defines the platform shell — the always-present application scaffolding (layout, router, theming, i18n, multi-vertical switcher, public hooks, vertical extension surface) that every product user sees regardless of which vertical pack is active. The shell is the host; features plug in as panels, verticals plug in via manifest. Removing any vertical or feature does not affect the shell; the shell does not know what specific verticals or features exist.
 
-**Hard rule** (P4 + P10): the shell's public surface — composables, layout slots, vertical extension API — is **stable + additive only** within v0.x. Adding a new composable / slot is fine; removing or changing the signature of an existing one breaks every feature and every vertical at once.
+**Hard rule** (P4 + P10): the shell's public surface — hooks, layout slots, vertical extension API — is **stable + additive only** within v0.x. Adding a new hook / slot is fine; removing or changing the signature of an existing one breaks every feature and every vertical at once.
 
 ---
 
@@ -19,23 +20,23 @@ This file defines the platform shell — the always-present application scaffold
 
 **Covers.**
 - Module layout (`packages/platform-shell/src/...`).
-- Top-level Vue layout components (`<PlatformShell>`, `<Header>`, `<SideNav>`, `<MainOutlet>`, `<ToastContainer>`).
-- Vue Router configuration: route taxonomy (auth / platform / vertical-prefixed / catch-all), guards (auth-required, permission-required, vertical-active).
-- Public composables (the contract every feature + every vertical depends on): `useUser`, `useStudio`, `useStudioHealth`, `useActiveVertical`, `useNotifications`, `useToast`, `useMeetingStreamStore`, `usePermission`, `useFeatureFlag`, `useTheme`, `useI18n`, `useRouter` (re-exported).
+- Top-level React layout components (`<PlatformShell>`, `<Header>`, `<SideNav>`, `<MainOutlet>`, `<ToastContainer>`).
+- React Router v6 configuration (data API via `createBrowserRouter`): route taxonomy (auth / platform / vertical-prefixed / catch-all), loaders (auth-required, permission-required, vertical-active resolution).
+- Public React hooks (the contract every feature + every vertical depends on): `useUser`, `useStudio`, `useStudioHealth`, `useActiveVertical`, `useNotifications`, `useToast`, `useMeetingStream` (re-exported from `01b`), `usePermission`, `usePermissions`, `useFeatureFlag`, `useTheme`, `useI18n`.
 - Vertical extension API: `VerticalManifest` TypeScript interface + `registerVertical(manifest)` registration function + boot-time discovery flow.
 - Theming (light / dark / system + per-vertical accent), persisted via user-service.
-- i18n (vue-i18n; `zh` + `en` for v0.1; locale persisted; vertical bundles merged on registration).
+- i18n (react-i18next; `zh` + `en` for v0.1; locale persisted; vertical bundles merged on registration via `addResourceBundle`).
 - Notification model (transient toasts vs persistent notifications; sources, dedup, retention).
-- Permission model (string-typed grants from auth-service; reactive checks).
+- Permission model (string-typed grants from auth-service; reactive checks via Zustand selectors).
 - Multi-vertical switcher (UI element + state management; switching semantics).
 - Boot sequence (the order in which shell, features, verticals come up).
-- Test matrix per composable + per layout slot + per route guard.
+- Test matrix per hook + per layout slot + per route loader.
 
 **Does not cover.**
 - The `StudioClient` Protocol or its DTOs — `01-studio-client-spec.md`.
-- The 4 agora-specific reducers (`useOutcomeReducer`, `useDagState`, `useCostState`, `useProvenance`) — `01b-product-derivations-spec.md` (they live in agora, not shell).
+- The 4 agora-specific reducer hooks (`useOutcomeReducer`, `useDagState`, `useCostState`, `useProvenance`) — `01b-product-derivations-spec.md` (they live in agora, not shell).
 - Login UI flow (form, validation, session creation) — `03-auth-service-spec.md` provides the backend; the shell only guards routes via `useUser()` and redirects to `/login` when needed.
-- User preferences storage — `04-user-service-spec.md` provides the backend; the shell reads/writes via composables.
+- User preferences storage — `04-user-service-spec.md` provides the backend; the shell reads/writes via hooks.
 - Specific feature panels — `05`–`12`.
 - Vertical-specific UI / data feeds — `13-vertical-template-spec.md` + `14-...`.
 - Backend (FastAPI) — `15-apps-api-spec.md`. The shell only TALKS to product API endpoints; it does not host them.
@@ -55,44 +56,46 @@ This file defines the platform shell — the always-present application scaffold
 ```
 packages/platform-shell/
 ├── src/
-│   ├── index.ts                          # public exports (composables + types + registerVertical)
+│   ├── index.ts                          # public exports (hooks + types + registerVertical + components)
 │   ├── components/
-│   │   ├── PlatformShell.vue             # top-level layout
-│   │   ├── Header.vue
-│   │   ├── SideNav.vue
-│   │   ├── MainOutlet.vue
-│   │   ├── ToastContainer.vue
-│   │   ├── VerticalSwitcher.vue
-│   │   ├── UserMenu.vue
-│   │   ├── NotificationBell.vue
-│   │   ├── StudioHealthIndicator.vue
-│   │   └── PermissionGate.vue            # <PermissionGate code="...">slot</PermissionGate>
-│   ├── composables/
+│   │   ├── PlatformShell.tsx             # top-level layout
+│   │   ├── Header.tsx
+│   │   ├── SideNav.tsx
+│   │   ├── MainOutlet.tsx
+│   │   ├── ToastContainer.tsx
+│   │   ├── VerticalSwitcher.tsx
+│   │   ├── UserMenu.tsx
+│   │   ├── NotificationBell.tsx
+│   │   ├── StudioHealthIndicator.tsx
+│   │   └── PermissionGate.tsx            # <PermissionGate code="..." fallback={...}>{children}</PermissionGate>
+│   ├── hooks/
 │   │   ├── useUser.ts
 │   │   ├── useStudio.ts
 │   │   ├── useStudioHealth.ts
 │   │   ├── useActiveVertical.ts
 │   │   ├── useNotifications.ts           # also exports useToast
-│   │   ├── useMeetingStreamStore.ts      # the store from 01b §2
-│   │   ├── usePermission.ts
+│   │   ├── useMeetingStream.ts           # re-export from 01b §2.4
+│   │   ├── usePermission.ts              # also exports usePermissions
 │   │   ├── useFeatureFlag.ts
 │   │   ├── useTheme.ts
-│   │   └── useI18n.ts                    # thin wrapper over vue-i18n
-│   ├── stores/                            # Pinia stores (private; consumed via composables)
-│   │   ├── studio.ts                     # holds the StudioClient instance
-│   │   ├── user.ts
-│   │   ├── verticals.ts                  # registered manifests + active id
-│   │   ├── notifications.ts
-│   │   ├── theme.ts
-│   │   └── feature-flags.ts
+│   │   └── useI18n.ts                    # thin wrapper over react-i18next's useTranslation
+│   ├── stores/                            # Zustand stores (private; consumed via hooks)
+│   │   ├── useStudioStore.ts             # holds the StudioClient instance
+│   │   ├── useUserStore.ts
+│   │   ├── useVerticalsStore.ts          # registered manifests + active id
+│   │   ├── useNotificationsStore.ts
+│   │   ├── useThemeStore.ts
+│   │   ├── useFeatureFlagsStore.ts
+│   │   └── useMeetingStreamRegistry.ts   # Zustand store from 01b §2.2
 │   ├── router/
-│   │   ├── index.ts                      # createRouter() + route table
-│   │   └── guards.ts                     # auth-required / permission-required / vertical-active
+│   │   ├── index.ts                      # createBrowserRouter() + route table builder
+│   │   ├── loaders.ts                    # auth-required / permission-required / vertical-active
+│   │   └── guards.tsx                    # Layout components + redirect helpers
 │   ├── verticals/
 │   │   ├── manifest.ts                   # VerticalManifest type + validation
 │   │   └── registry.ts                   # registerVertical, listVerticals, getActiveVertical
 │   ├── i18n/
-│   │   ├── index.ts                      # createI18n() + base bundles
+│   │   ├── index.ts                      # i18next.init() with platform bundles
 │   │   ├── zh.json
 │   │   └── en.json
 │   ├── theme/
@@ -101,27 +104,26 @@ packages/platform-shell/
 │   └── types/
 │       ├── permission.ts                 # PermissionCode = string (branded)
 │       └── notification.ts
-├── tests/                                  # Vitest + Vue Testing Library
-│   ├── composables/
+├── tests/                                  # Vitest + React Testing Library
+│   ├── hooks/
 │   ├── components/
 │   └── router/
-├── package.json
+├── package.json                            # depends on react, react-dom, react-router-dom,
+│                                           #            zustand, react-i18next, i18next
 └── tsconfig.json
 ```
 
-**No backend code.** Shell is pure frontend (Vue 3 + TS + Pinia). Backend equivalents (auth-service, user-service, apps/api) are separate packages.
+**No backend code.** Shell is pure frontend (React 18 + TypeScript + Zustand + React Router v6 + react-i18next + Tailwind). Backend equivalents (auth-service, user-service, apps/api) are separate packages.
 
 ---
 
-## §2 Public composables
+## §2 Public hooks
 
-This is the **contract every feature + vertical depends on**. Adding a composable is a minor bump; removing or changing a signature is forbidden in v0.x (P4).
+This is the **contract every feature + vertical depends on**. Adding a hook is a minor bump; removing or changing a signature is forbidden in v0.x (P4).
 
 ### 2.1 `useUser`
 
 ```typescript
-import type { Ref, ComputedRef } from "vue";
-
 export interface User {
   user_id:        string;            // opaque to product (passed through to studio as-is)
   display_name:   string;            // user-facing
@@ -131,17 +133,20 @@ export interface User {
   authenticated_at: string;          // ISO-8601
 }
 
-export function useUser(): {
-  user:               ComputedRef<User | null>;     // null when unauthenticated
-  is_authenticated:   ComputedRef<boolean>;
-  refresh():          Promise<void>;                // re-fetch from auth-service /me endpoint
-  signOut():          Promise<void>;                // invalidate session, redirect to /login
-};
+export interface UseUserReturn {
+  user:               User | null;     // null when unauthenticated
+  is_authenticated:   boolean;
+  refresh():          Promise<void>;   // re-fetch from auth-service /me endpoint
+  signOut():          Promise<void>;   // invalidate this session, redirect to /login
+  signOutAll():       Promise<void>;   // invalidate every session for this user
+}
+
+export function useUser(): UseUserReturn;
 ```
 
-**Source.** Backed by `useUserStore` (Pinia) which fetches from `GET /api/auth/me` on app mount and caches. Re-fetched on `refresh()` or when an `AuthRequired` error surfaces from any API call.
+**Source.** Backed by `useUserStore` (Zustand) which fetches from `GET /api/auth/me` on app boot and caches. Re-fetched on `refresh()` or when an `AuthRequired` error surfaces from any API call.
 
-**Reactivity.** All consumers watching `user` re-render when sign-in / sign-out / preference-update happens.
+**Reactivity.** All consumers selecting `user` re-render when sign-in / sign-out / preference-update happens. Zustand selectors ensure components only re-render on the slices they read.
 
 ### 2.2 `useStudio`
 
@@ -151,7 +156,7 @@ import type { StudioClient } from "@entelecheia/studio-client";
 export function useStudio(): StudioClient;
 ```
 
-**Source.** `useStudioStore` holds the configured `StudioClient` instance; it is set once at app boot by `apps/frontend/main.ts` (per `16-apps-frontend-spec.md`). Shell does NOT decide which implementation (`PseudoStudioClient` vs `HttpStudioClient`) — that's `apps/frontend`'s job based on env config.
+**Source.** `useStudioStore` holds the configured `StudioClient` instance; it is set once at app boot by `apps/frontend/main.tsx` (per `16-apps-frontend-spec.md`). Shell does NOT decide which implementation (`PseudoStudioClient` vs `HttpStudioClient`) — that's `apps/frontend`'s job based on env config.
 
 **Throws.** `Error("StudioClient not configured")` if called before `apps/frontend` has provided one. Surfaces as a developer error; never reaches end users in correctly-built deployments.
 
@@ -160,36 +165,42 @@ export function useStudio(): StudioClient;
 ```typescript
 import type { StudioHealth } from "@entelecheia/studio-client";
 
-export function useStudioHealth(opts?: {
+export interface UseStudioHealthOptions {
   poll_interval_ms?:   number;     // default 30_000 (30s)
   enabled?:            boolean;    // default true; false to suspend polling
-}): {
-  health:    ComputedRef<StudioHealth | null>;
-  is_loading: ComputedRef<boolean>;
-  error:      ComputedRef<string | null>;
+}
+
+export interface UseStudioHealthReturn {
+  health:    StudioHealth | null;
+  is_loading: boolean;
+  error:      string | null;
   refresh():  Promise<void>;       // force one immediate fetch
-};
+}
+
+export function useStudioHealth(opts?: UseStudioHealthOptions): UseStudioHealthReturn;
 ```
 
-**Behavior.** On mount: one immediate fetch (`StudioClient.get_studio_health()`); thereafter polls every `poll_interval_ms`. Errors set `error` but keep last-known `health` for UI continuity. On unmount: cancel polling.
+**Behavior.** On mount: one immediate fetch (`StudioClient.get_studio_health()`); thereafter polls every `poll_interval_ms` via `setInterval` registered in `useEffect`; cleanup clears the interval on unmount. Errors set `error` but keep last-known `health` for UI continuity.
 
 **UI consumer.** `<StudioHealthIndicator>` renders a small dot in the header (green = both live and ready; amber = live not ready; red = unreachable).
 
 ### 2.4 `useActiveVertical`
 
 ```typescript
-export function useActiveVertical(): {
-  active:                ComputedRef<VerticalManifest | null>;  // null only during boot
-  available:             ComputedRef<VerticalManifest[]>;       // verticals user has any permission for
-  switchTo(id: string):  Promise<void>;                         // navigates to vertical's default tab
-};
+export interface UseActiveVerticalReturn {
+  active:                VerticalManifest | null;  // null only during boot
+  available:             VerticalManifest[];       // verticals user has any permission for
+  switchTo(id: string):  Promise<void>;            // navigates to vertical's default route
+}
+
+export function useActiveVertical(): UseActiveVerticalReturn;
 ```
 
 **Switching semantics.**
 - Updates active vertical in `useVerticalsStore`.
 - Persists choice to user-service preferences (`active_vertical`).
-- Navigates router to `/{vertical_id}/{first_tab_id}` (or vertical's declared `default_route`).
-- Does NOT tear down meeting subscriptions; `useMeetingStreamStore` instances are keyed by `meeting_id` (not `vertical_id`), so switching and switching back leaves them intact.
+- Calls React Router's `navigate()` to `/{vertical_id}/{first_tab_id}` (or vertical's declared `default_route`).
+- Does NOT tear down meeting subscriptions; `useMeetingStream` instances are keyed by `meeting_id` (not `vertical_id`), so switching and switching back leaves them intact.
 - Re-evaluates permission gates: tabs / widgets the user lacks permission for stay hidden.
 
 **Single-vertical user.** When `available.length === 1`, the switcher UI is hidden (CSS); `active` is set to that vertical at boot.
@@ -214,23 +225,27 @@ export interface Notification {
   dedupe_key:   string | null;                             // dedupe within a 5-min window
 }
 
-export function useNotifications(): {
-  list:           ComputedRef<Notification[]>;             // ordered by created_at desc; last 50 retained
-  unread_count:   ComputedRef<number>;
+export interface UseNotificationsReturn {
+  list:           Notification[];                          // ordered by created_at desc; last 50 retained
+  unread_count:   number;
   push(n: Omit<Notification, "id" | "created_at" | "read">): void;
   markRead(id: string):   void;
   markAllRead():          void;
   dismiss(id: string):    void;
-};
+}
 
-export function useToast(): {
+export function useNotifications(): UseNotificationsReturn;
+
+export interface UseToastReturn {
   show(opts: {
     severity:    NotificationSeverity;
     title:       string;
     body?:       string;
     duration_ms?: number;          // default 5000; 0 = sticky until manual dismiss
   }): void;
-};
+}
+
+export function useToast(): UseToastReturn;
 ```
 
 **Toast vs Notification.**
@@ -243,39 +258,40 @@ A common pattern: features call BOTH `useToast().show(...)` (immediate UX) and `
 
 **Retention.** Bell list keeps last 50; older drop on push (oldest-first eviction).
 
-### 2.6 `useMeetingStreamStore`
+### 2.6 `useMeetingStream`
 
-Defined in `01b-product-derivations-spec.md` §2. Lives at `packages/platform-shell/src/composables/useMeetingStreamStore.ts`. Re-exported from `packages/platform-shell/src/index.ts`.
+Re-exported from `01b-product-derivations-spec.md` §2.4. Lives at `packages/platform-shell/src/hooks/useMeetingStream.ts`. Re-exported from `packages/platform-shell/src/index.ts`.
 
 Signature recap (full contract in 01b):
 
 ```typescript
-export function useMeetingStreamStore(meeting_id: string): {
-  state:        Ref<MeetingStreamState>;
-  subscribe():  Promise<void>;
-  unsubscribe(): Promise<void>;
-  reconnect():  Promise<void>;
-  reset():      void;
-  forceFullReload(): Promise<void>;
-};
+export interface UseMeetingStreamReturn {
+  state:           MeetingStreamState | undefined;
+  reconnect:       () => Promise<void>;
+  reset:           () => void;
+  forceFullReload: () => Promise<void>;
+}
+
+export function useMeetingStream(meeting_id: string): UseMeetingStreamReturn;
 ```
+
+The underlying Zustand registry (`useMeetingStreamRegistry`) is also exported from this package for advanced use (chathub directly subscribes via the registry — see `08-feature-chathub-spec.md`).
 
 ### 2.7 `usePermission`
 
 ```typescript
-export function usePermission(code: string): ComputedRef<boolean>;
+export function usePermission(code: string): boolean;
 
-export function usePermissions(codes: string[], mode: "any" | "all" = "all"): ComputedRef<boolean>;
+export function usePermissions(codes: string[], mode?: "any" | "all"): boolean;   // mode default "all"
 ```
 
-**Source.** `useUser().user.value.permissions` array.
-**Reactivity.** Re-evaluates when `user.permissions` changes (e.g., admin grants new permission, user re-authenticates).
+**Source.** Selects from `useUserStore`'s `user.permissions` array via Zustand selector — components only re-render when the relevant permission changes (or sign-in / sign-out happens).
 **Naming convention.** Permissions are `<scope>:<verb>` strings: `platform:list_projects`, `platform:run_meeting`, `<vertical_id>:open_meeting`, `<vertical_id>:upload_data_kind_X`. Vertical-scoped permissions use the vertical's id as scope.
 
 ### 2.8 `useFeatureFlag`
 
 ```typescript
-export function useFeatureFlag(flag: string, default_value: boolean = false): ComputedRef<boolean>;
+export function useFeatureFlag(flag: string, default_value?: boolean): boolean;   // default false
 ```
 
 **Source.** `useFeatureFlagsStore` is populated at boot from `GET /api/platform/feature-flags` (apps/api endpoint, see `15-apps-api-spec.md`).
@@ -286,32 +302,38 @@ export function useFeatureFlag(flag: string, default_value: boolean = false): Co
 ```typescript
 export type ThemeMode = "light" | "dark" | "system";
 
-export function useTheme(): {
-  mode:        Ref<ThemeMode>;          // resolved theme; "system" follows OS prefers-color-scheme
-  setMode(m: ThemeMode):  void;         // persists to user prefs
-  accent:      ComputedRef<string>;     // hex color from active vertical's accent_color or platform default
-};
+export interface UseThemeReturn {
+  mode:        ThemeMode;          // resolved theme; "system" follows OS prefers-color-scheme
+  setMode(m: ThemeMode):  void;    // persists to user prefs
+  accent:      string;             // hex color from active vertical's accent_color or platform default
+}
+
+export function useTheme(): UseThemeReturn;
 ```
 
-**Persistence.** Theme mode is stored in user-service preferences. On mount, restore.
+**Persistence.** Theme mode is stored in user-service preferences. On boot, restore.
 
-**Accent color.** Derived from `useActiveVertical().active.value?.accent_color ?? "#3B82F6"` (platform default). Verticals MAY declare `accent_color` in their manifest (per §3); shell applies it as a CSS variable consumed by Tailwind tokens.
+**Accent color.** Derived from `useActiveVertical().active?.accent_color ?? "#3B82F6"` (platform default). Verticals MAY declare `accent_color` in their manifest (per §3); shell applies it as a CSS variable consumed by Tailwind tokens.
+
+**System mode.** When `mode === "system"`, the shell registers a `MediaQueryList` listener for `(prefers-color-scheme: dark)` via a `useEffect` in `<PlatformShell>` and re-applies the theme on OS change.
 
 ### 2.10 `useI18n`
 
 ```typescript
-export type Locale = "zh" | "en";   // v0.1 fixed; new locales added via vue-i18n
+export type Locale = "zh" | "en";   // v0.1 fixed; new locales added via i18next config
 
-export function useI18n(): {
+export interface UseI18nReturn {
   t(key: string, args?: Record<string, string | number>): string;
-  locale:    Ref<Locale>;
+  locale:    Locale;
   setLocale(l: Locale):  void;       // persists to user prefs; refreshes route titles + meta
-};
+}
+
+export function useI18n(): UseI18nReturn;
 ```
 
-Thin wrapper over vue-i18n's `useI18n`. Provides typed `t()` against the merged translation bundles (platform + active vertical + currently-loaded feature). Missing-key fallback logs a warning and returns the key string in dev; returns the English value in production.
+Thin wrapper over react-i18next's `useTranslation()`. Provides typed `t()` against the merged translation bundles (platform + active vertical + currently-loaded feature). Missing-key fallback logs a warning and returns the key string in dev; returns the English value in production (configured via `i18next.init({ fallbackLng: "en" })`).
 
-**Per-vertical i18n bundles** are merged into the global vue-i18n instance at `registerVertical` time (per §3.3).
+**Per-vertical i18n bundles** are merged into the global i18next instance at `registerVertical` time via `i18next.addResourceBundle(lng, namespace, bundle, deep=true, overwrite=true)` (per §3.3 and §6.3).
 
 ### 2.11 `UserPreferences` (returned by `useUser`)
 
@@ -327,7 +349,7 @@ export interface UserPreferences {
 }
 ```
 
-**Storage.** All persisted to user-service via `PUT /api/user/preferences` (per `04-user-service-spec.md`). Shell debounces writes (500 ms) so rapid toggles don't spam the server.
+**Storage.** All persisted to user-service via `PUT /api/user/preferences` (per `04-user-service-spec.md`). Shell debounces writes (500 ms via per-store debounced action) so rapid toggles don't spam the server.
 
 ---
 
@@ -338,15 +360,19 @@ This is the **only** way verticals plug into the shell (P5). The shell exposes o
 ### 3.1 `VerticalManifest`
 
 ```typescript
-import type { Component } from "vue";
+import type { ComponentType, LazyExoticComponent } from "react";
 import type { ProjectId } from "@entelecheia/studio-client";
+
+// React component type accepted by every contribution slot.
+// Allows both eager components and lazy-loaded (code-split) ones.
+export type VerticalReactComponent = ComponentType<any> | LazyExoticComponent<ComponentType<any>>;
 
 export interface VerticalManifest {
   // identity
   vertical_id:    string;                       // matches backend manifest's vertical_id; lowercase snake; e.g. "vertical-a"
   display_name:   string;                       // user-facing; shown in switcher; localizable via i18n
   description:    string;                       // <= 200 chars; one-liner
-  icon:           string;                       // lucide-vue-next icon name; rendered in switcher
+  icon:           string;                       // lucide-react icon name; rendered in switcher
 
   // appearance (optional)
   accent_color:   string | null;                // hex like "#FF8800"; default null = platform default
@@ -360,7 +386,7 @@ export interface VerticalManifest {
   // project filtering (per 01-studio-client §11.4)
   default_project_filter: { project_id_in: ProjectId[] };
 
-  // i18n bundles (merged into global vue-i18n on registration)
+  // i18n bundles (merged into global i18next instance on registration via addResourceBundle)
   i18n:           { zh: Record<string, string>; en: Record<string, string> };
 
   // optional: where switching to this vertical lands by default
@@ -371,14 +397,14 @@ export interface TabContribution {
   id:                    string;                // unique within vertical; lowercase snake; e.g. "data-explorer"
   label_key:             string;                // i18n key; resolved at render via useI18n().t()
   route_path:            string;                // mounted under /<vertical_id>/<route_path>; must start with /
-  component:             Component;             // Vue component (lazy-load supported via () => import(...))
+  component:             VerticalReactComponent; // React component; lazy-load supported
   required_permission:   string | null;         // gate; null = no gate beyond being in the vertical
   position:              number;                // ordering hint; lower = earlier in side nav
 }
 
 export interface WidgetContribution {
   id:                    string;
-  component:             Component;
+  component:             VerticalReactComponent;
   preferred_position:    "top-left" | "top-right" | "bottom-left" | "bottom-right";
   title_key:             string;                // i18n key
   required_permission:   string | null;
@@ -389,7 +415,7 @@ export interface UploadHandlerContribution {
   label_key:             string;                // i18n key for picker label
   accepts:               string[];              // file extensions or MIME types; e.g. [".csv", ".xlsx"]
   max_size_bytes:        number;                // default 10_000_000 (10 MB)
-  handler_component:     Component;             // renders the per-file UI (preview, parse confirmation)
+  handler_component:     VerticalReactComponent; // React component
   studio_material_kind:  "brief" | "data";      // how it gets passed to studio at run_meeting (per 01 §4.6)
 }
 
@@ -409,8 +435,8 @@ export function registerVertical(manifest: VerticalManifest): void;
 **Behavior.**
 1. Validates the manifest against the schema (throws `VerticalRegistrationError` on validation failure with the offending field).
 2. Validates `vertical_id` uniqueness; throws if a vertical with that id is already registered.
-3. Merges `manifest.i18n.zh` and `manifest.i18n.en` into the global vue-i18n instance under namespace `vertical.<vertical_id>.<key>`.
-4. Adds tabs to Vue Router (mounted under `/{vertical_id}/...`).
+3. Merges `manifest.i18n.zh` and `manifest.i18n.en` into the global i18next instance under namespace `vertical.<vertical_id>.<key>` via `i18next.addResourceBundle`.
+4. Adds tabs to the React Router route table builder (mounted under `/{vertical_id}/...` after all verticals are registered — see §3.3).
 5. Adds widgets to the dashboard layout registry.
 6. Adds upload handlers to the uploads-feature registry.
 7. Adds data-feed metadata (the actual proxy lives in the vertical's backend per `13-vertical-template-spec.md`).
@@ -430,17 +456,18 @@ export class VerticalRegistrationError extends Error {
 The shell does NOT scan the filesystem for verticals. It loads them via the apps/frontend boot path (per `16-apps-frontend-spec.md`):
 
 ```
-apps/frontend/main.ts startup:
+apps/frontend/main.tsx startup:
   1. Fetch GET /api/platform/verticals → { available: [{vertical_id, frontend_module_path}, ...] }
   2. For each available vertical:
-       a. Dynamic import: const mod = await import(frontend_module_path)
+       a. Dynamic import: const mod = await import(/* @vite-ignore */ frontend_module_path)
        b. mod.default is a VerticalManifest (per convention)
        c. registerVertical(mod.default)
   3. Resolve active vertical:
-       a. Read useUser().user.value.preferences.active_vertical
+       a. Read useUserStore.getState().user?.preferences.active_vertical
        b. If null OR not in registered set: pick first vertical user has permission for
-       c. Set as active via useVerticalsStore.setActive(id)
-  4. Mount <PlatformShell /> + Router
+       c. Set as active via useVerticalsStore.getState().setActive(id)
+  4. Build router: createBrowserRouter([...]) with all routes (platform + vertical-contributed) registered
+  5. createRoot(document.getElementById("root")!).render(<RouterProvider router={router} />)
 ```
 
 Failures during step 2 (one vertical fails to load) are logged + reported to the user via a toast ("Vertical 'X' failed to load: <reason>"); the shell continues with the remaining verticals (P5 isolation: a broken vertical does not bring down the shell).
@@ -469,51 +496,120 @@ Route table (declared in packages/platform-shell/src/router/index.ts)
 /{vertical_id}/{tab_route_path}       → resolved at registration via TabContribution
                                         e.g. /vertical-a/data-explorer
 
-/:catch_all(.*)                       → <NotFound />
+*                                     → <NotFound />
 ```
 
-### 4.1 Route guards
+Built via React Router v6 data API (`createBrowserRouter`):
 
 ```typescript
-// packages/platform-shell/src/router/guards.ts
+export function buildRouter() {
+  const verticalRoutes = useVerticalsStore.getState().listVerticals().flatMap(v =>
+    v.tabs.map(tab => ({
+      path: `/${v.vertical_id}${tab.route_path}`,
+      lazy: typeof tab.component === "function"
+        ? async () => ({ Component: tab.component })
+        : undefined,
+      element: typeof tab.component !== "function" ? <tab.component /> : undefined,
+      loader: makePermissionLoader(tab.required_permission),
+    }))
+  );
 
-router.beforeEach(async (to, from, next) => {
-  // 1. Auth guard
-  if (to.meta.requires_auth !== false && !useUser().is_authenticated.value) {
-    return next({ path: "/login", query: { redirect: to.fullPath } });
-  }
-
-  // 2. Permission guard
-  const required: string[] = to.meta.required_permissions ?? [];
-  if (required.length > 0 && !usePermissions(required, "all").value) {
-    useToast().show({ severity: "error", title: "permission.denied" });
-    return next({ path: "/platform/dashboard" });
-  }
-
-  // 3. Vertical-active guard (for /{vertical_id}/... routes)
-  if (to.params.vertical_id) {
-    const vid = to.params.vertical_id as string;
-    const vertical = useVerticalsStore().byId(vid);
-    if (!vertical) return next({ name: "not-found" });
-    // auto-switch active vertical if user navigated to a different vertical's URL
-    if (useActiveVertical().active.value?.vertical_id !== vid) {
-      await useActiveVertical().switchTo(vid);
-    }
-  }
-
-  next();
-});
+  return createBrowserRouter([
+    {
+      path: "/login",
+      lazy: () => import("@auth-service/LoginPage").then(m => ({ Component: m.default })),
+    },
+    {
+      path: "/",
+      element: <PlatformShell />,
+      loader: requireAuthLoader,
+      children: [
+        { index: true, loader: () => redirect("/platform/dashboard") },
+        { path: "platform/dashboard", lazy: () => import("./Dashboard").then(m => ({ Component: m.default })) },
+        { path: "platform/agora/:meeting_id?", lazy: () => import("@feature/agora").then(m => ({ Component: m.AgoraView })) },
+        // ... other platform-feature routes
+        ...verticalRoutes,
+      ],
+    },
+    { path: "*", element: <NotFound /> },
+  ]);
+}
 ```
 
-**Default meta on routes.**
-- `/login`: `{ requires_auth: false }`
-- `/platform/agora/:meeting_id?`: `{ required_permissions: ["platform:run_meeting"] }`
-- `/platform/observability`: `{ required_permissions: ["platform:view_observability"] }`
-- (Other defaults declared in each feature's spec.)
+### 4.1 Route loaders + Layout-level guards
 
-### 4.2 Route → vertical mapping
+React Router v6 doesn't have a global `beforeEach`. Use:
+- **Loaders for auth + permissions.** Each protected route declares a `loader` that throws a `redirect()` response when unauthenticated or unauthorized.
+- **`<PlatformShell>` Layout component** for vertical-active resolution (it reads `useParams()` for `:vertical_id` and calls `useActiveVertical().switchTo()` if the URL implies a vertical change; runs in a `useEffect`).
 
-Vertical tabs mount at `/{vertical_id}/{tab_route_path}` exactly. The shell handles the URL parsing; verticals only declare relative `route_path` in their manifest. This means switching verticals via the switcher updates the URL prefix; bookmarks always include the vertical id.
+```typescript
+// packages/platform-shell/src/router/loaders.ts
+
+export async function requireAuthLoader({ request }: LoaderFunctionArgs) {
+  const user = useUserStore.getState().user;
+  if (!user) {
+    const url = new URL(request.url);
+    return redirect(`/login?redirect=${encodeURIComponent(url.pathname + url.search)}`);
+  }
+  return null;
+}
+
+export function makePermissionLoader(required: string | null) {
+  if (!required) return undefined;
+  return async () => {
+    const perms = useUserStore.getState().user?.permissions ?? [];
+    if (!perms.includes(required)) {
+      // Toast + redirect
+      useNotificationsStore.getState().pushToast({
+        severity: "error",
+        title: "permission.denied",
+      });
+      return redirect("/platform/dashboard");
+    }
+    return null;
+  };
+}
+```
+
+The vertical-active guard lives in `<PlatformShell>` itself:
+
+```tsx
+// packages/platform-shell/src/components/PlatformShell.tsx (excerpt)
+function PlatformShell() {
+  const params = useParams();
+  const switchTo = useVerticalsStore(s => s.setActive);
+  const active = useVerticalsStore(s => s.activeId);
+
+  useEffect(() => {
+    const urlVerticalId = params.vertical_id;
+    if (urlVerticalId && urlVerticalId !== active) {
+      switchTo(urlVerticalId);
+    }
+  }, [params.vertical_id, active]);
+
+  return (
+    <div className="grid ...">
+      <Header />
+      <SideNav />
+      <MainOutlet />
+      <ToastContainer />
+    </div>
+  );
+}
+```
+
+### 4.2 Default meta on routes
+
+Each route's metadata (`required_permissions`, `title_key`) is encoded directly in the loader / route object — React Router doesn't have a generic `meta` field like Vue Router. Each feature's spec declares its loader in its own routes file.
+
+**Examples** (per feature spec):
+- `/login`: no `requireAuthLoader`
+- `/platform/agora/:meeting_id?`: requires `platform:run_meeting` (loader from `05`)
+- `/platform/observability`: requires `platform:view_observability` (loader from `12`)
+
+### 4.3 Route → vertical mapping
+
+Vertical tabs mount at `/{vertical_id}/{tab_route_path}` exactly. The shell handles the URL parsing via React Router's path params; verticals only declare relative `route_path` in their manifest. This means switching verticals via the switcher updates the URL prefix; bookmarks always include the vertical id.
 
 ---
 
@@ -565,11 +661,11 @@ CSS variables are declared per `data-theme="..."` selector in `packages/platform
 
 ### 5.3 Per-vertical accent
 
-When `useActiveVertical().active.value?.accent_color` changes, `useTheme()` re-applies. UI updates immediately via CSS variable propagation; no component re-render needed.
+When `useActiveVertical().active?.accent_color` changes, `useTheme()`'s underlying Zustand store re-applies via a subscription effect. UI updates immediately via CSS variable propagation; no React re-render needed for color change.
 
 ### 5.4 Material Symbols
 
-Icons rendered via Material Symbols font (loaded once in `apps/frontend`, see spec 16) plus Lucide for vertical icons.
+Icons rendered via Material Symbols font (loaded once in `apps/frontend`, see spec 16) plus lucide-react for vertical icons.
 
 ---
 
@@ -577,21 +673,28 @@ Icons rendered via Material Symbols font (loaded once in `apps/frontend`, see sp
 
 ### 6.1 Engine
 
-`vue-i18n` (Composition API mode). Created once in `packages/platform-shell/src/i18n/index.ts`:
+`react-i18next` over `i18next`. Created once in `packages/platform-shell/src/i18n/index.ts`:
 
 ```typescript
-import { createI18n } from "vue-i18n";
+import i18n from "i18next";
+import { initReactI18next } from "react-i18next";
 import zh from "./zh.json";
 import en from "./en.json";
 
-export const i18n = createI18n({
-  legacy: false,
-  locale: "en",                // overridden at boot from user prefs
-  fallbackLocale: "en",
-  messages: { zh, en },
-  missingWarn: import.meta.env.DEV,
-  fallbackWarn: import.meta.env.DEV,
-});
+await i18n
+  .use(initReactI18next)
+  .init({
+    resources: {
+      zh: { translation: zh },
+      en: { translation: en },
+    },
+    lng: "en",                      // overridden at boot from user prefs
+    fallbackLng: "en",
+    interpolation: { escapeValue: false },  // React already escapes
+    debug: import.meta.env.DEV,
+  });
+
+export { i18n };
 ```
 
 ### 6.2 Bundle structure
@@ -606,7 +709,7 @@ Top-level namespaces in JSON: `layout.*`, `nav.*`, `common.*`, `error.*`, `permi
 
 ### 6.3 Vertical bundles merged at registration
 
-`registerVertical(manifest)` merges `manifest.i18n.zh` under namespace `vertical.<vertical_id>.<key>`:
+`registerVertical(manifest)` merges `manifest.i18n.zh` under namespace `vertical.<vertical_id>.<key>` via `i18next.addResourceBundle`:
 
 ```typescript
 // In manifest:
@@ -614,6 +717,12 @@ i18n: {
   zh: { "tab.data_explorer": "数据浏览" },
   en: { "tab.data_explorer": "Data Explorer" },
 }
+
+// At registerVertical time, the shell calls:
+i18next.addResourceBundle("zh", "translation",
+  { vertical: { [manifest.vertical_id]: manifest.i18n.zh } }, true, true);
+i18next.addResourceBundle("en", "translation",
+  { vertical: { [manifest.vertical_id]: manifest.i18n.en } }, true, true);
 
 // After registration, accessible as:
 useI18n().t(`vertical.${verticalId}.tab.data_explorer`)
@@ -623,7 +732,7 @@ Key collisions across verticals are isolated by namespace; no collision is possi
 
 ### 6.4 Feature i18n
 
-Each platform feature ships its own bundle and registers it via a feature-internal API (defined in each feature spec); the registration mechanism is the same merge into vue-i18n with namespace `feature.<feature_name>.<key>`.
+Each platform feature ships its own bundle and registers it via a feature-internal API (defined in each feature spec); the registration mechanism is the same `i18next.addResourceBundle` call with namespace `feature.<feature_name>.<key>`.
 
 ---
 
@@ -631,15 +740,22 @@ Each platform feature ships its own bundle and registers it via a feature-intern
 
 ### 7.1 Notification store
 
-Pinia store at `packages/platform-shell/src/stores/notifications.ts`:
+Zustand store at `packages/platform-shell/src/stores/useNotificationsStore.ts`:
 
 ```typescript
-interface NotificationsState {
+export interface NotificationsState {
   items:           Notification[];     // ordered by created_at desc
   retention_count: number;             // 50 by default
   dedupe_window_ms: number;            // 300_000 (5 min)
+  push(n: Omit<Notification, "id" | "created_at" | "read">): void;
+  pushToast(t: { severity: NotificationSeverity; title: string; body?: string; duration_ms?: number }): void;
+  markRead(id: string):  void;
+  markAllRead():         void;
+  dismiss(id: string):   void;
 }
 ```
+
+Toast queue is a separate slice within the same store (UI consumed by `<ToastContainer>`); transient items removed via `setTimeout` registered when `pushToast` is called.
 
 ### 7.2 Sources
 
@@ -677,28 +793,35 @@ Permission codes are `<scope>:<verb>` strings. Reserved scopes:
 
 ### 8.2 Source
 
-`useUser().user.value.permissions: string[]` — the full list, populated from `GET /api/auth/me`. Refreshed on user re-authentication.
+`useUser().user?.permissions: string[]` — the full list, populated from `GET /api/auth/me`. Refreshed on user re-authentication.
 
 ### 8.3 `<PermissionGate>` component
 
-```vue
-<template>
-  <PermissionGate code="platform:run_meeting">
-    <template #default>
-      <button @click="startMeeting">Start meeting</button>
-    </template>
-    <template #fallback>
-      <span class="text-muted">You don't have permission to start meetings.</span>
-    </template>
-  </PermissionGate>
-</template>
+```tsx
+import { PermissionGate } from "@entelecheia/platform-shell";
+
+<PermissionGate code="platform:run_meeting" fallback={<span className="text-muted">You don't have permission to start meetings.</span>}>
+  <button onClick={startMeeting}>Start meeting</button>
+</PermissionGate>
 ```
 
-Fallback slot is optional; when omitted, the gate renders nothing if denied.
+Component contract:
+
+```typescript
+export interface PermissionGateProps {
+  code:      string;
+  children:  React.ReactNode;
+  fallback?: React.ReactNode;       // optional; defaults to null (renders nothing)
+}
+
+export function PermissionGate(props: PermissionGateProps): React.ReactElement | null;
+```
+
+When `usePermission(code) === false`: renders `fallback ?? null`.
 
 ### 8.4 No permission, no UI
 
-Tabs and widgets contributed by verticals declare `required_permission`; the shell hides them entirely when the user lacks the permission. Routes guarded with `meta.required_permissions` redirect to `/platform/dashboard` with a toast.
+Tabs and widgets contributed by verticals declare `required_permission`; the shell hides them entirely when the user lacks the permission. Routes guarded with `makePermissionLoader(...)` redirect to `/platform/dashboard` with a toast.
 
 ---
 
@@ -706,45 +829,49 @@ Tabs and widgets contributed by verticals declare `required_permission`; the she
 
 ### 9.1 `<PlatformShell>` (top-level)
 
-```vue
-<template>
-  <div class="grid grid-rows-[auto_1fr] grid-cols-[16rem_1fr] h-screen">
-    <Header class="col-span-2" />
-    <SideNav />
-    <MainOutlet />
-    <ToastContainer />
-  </div>
-</template>
+```tsx
+export function PlatformShell() {
+  return (
+    <div className="grid grid-rows-[auto_1fr] grid-cols-[16rem_1fr] h-screen">
+      <Header className="col-span-2" />
+      <SideNav />
+      <MainOutlet />
+      <ToastContainer />
+    </div>
+  );
+}
 ```
 
-Single instance, mounted at app root.
+Single instance, mounted as the root layout via React Router.
 
 ### 9.2 `<Header>`
 
-Slots (in order): `<Logo />`, `<VerticalSwitcher />`, `<RouterBreadcrumbs />`, spacer, `<StudioHealthIndicator />`, `<NotificationBell />`, `<UserMenu />`.
+Slot order: `<Logo />`, `<VerticalSwitcher />`, `<RouterBreadcrumbs />`, spacer, `<StudioHealthIndicator />`, `<NotificationBell />`, `<UserMenu />`.
 
 ### 9.3 `<SideNav>`
 
 Two sections:
 - **Platform**: links to `/platform/dashboard`, `/platform/knowledge`, `/platform/chathub`, `/platform/reports`, `/platform/observability`, `/platform/settings` (those user has permission for).
-- **Vertical** (when `useActiveVertical().active.value` is non-null): tabs from `active.tabs` ordered by `position`, each gated by its `required_permission`.
+- **Vertical** (when `useActiveVertical().active` is non-null): tabs from `active.tabs` ordered by `position`, each gated by its `required_permission`.
 
 ### 9.4 `<MainOutlet>`
 
-```vue
-<template>
-  <main class="overflow-auto bg-bg">
-    <RouterView v-slot="{ Component }">
-      <Suspense>
-        <component :is="Component" />
-        <template #fallback><LoadingSpinner /></template>
+```tsx
+import { Outlet } from "react-router-dom";
+import { Suspense } from "react";
+
+export function MainOutlet() {
+  return (
+    <main className="overflow-auto bg-bg">
+      <Suspense fallback={<LoadingSpinner />}>
+        <Outlet />
       </Suspense>
-    </RouterView>
-  </main>
-</template>
+    </main>
+  );
+}
 ```
 
-`<Suspense>` wrapper supports lazy-loaded route components (used by all feature panels for code-splitting).
+`<Suspense>` supports the lazy-loaded route components (used by all feature panels for code-splitting).
 
 ### 9.5 `<VerticalSwitcher>`
 
@@ -754,66 +881,72 @@ Dropdown rendering `useActiveVertical().available` with the active highlighted. 
 
 ## §10 Boot sequence
 
-The exact order in which the shell comes up. Authoritative for `apps/frontend/main.ts` (per spec 16):
+The exact order in which the shell comes up. Authoritative for `apps/frontend/main.tsx` (per spec 16):
 
 ```
-1. Create Vue app instance
-2. Install Pinia
-3. Install vue-i18n (platform bundles only at this point)
-4. Configure StudioClient (env-driven: pseudo or http)
-5. useStudioStore().setClient(client)            # makes useStudio() work
-6. Fetch initial state in parallel:
-     a. GET /api/auth/me              → useUserStore().setUser(user)
+1. Read app config (env-driven; for VITE_* vars and feature-flag path)
+2. Initialize i18next (with platform bundles only at this point)
+3. Configure StudioClient (env-driven: pseudo or http) and call:
+     useStudioStore.getState().setClient(client)        # makes useStudio() work
+4. Fetch initial state in parallel:
+     a. GET /api/auth/me              → useUserStore.getState().setUser(user)
         (if 401, navigate to /login and stop here)
-     b. GET /api/platform/feature-flags → useFeatureFlagsStore().load(flags)
+     b. GET /api/platform/feature-flags → useFeatureFlagsStore.getState().load(flags)
      c. GET /api/platform/verticals    → list of {vertical_id, frontend_module_path}
-7. For each vertical entry from 6c:
+5. For each vertical entry from 4c:
      - Dynamic import frontend_module_path
      - registerVertical(module.default)
      - On error: push toast + skip
-8. Apply user preferences:
+6. Apply user preferences:
      - useTheme().setMode(user.preferences.theme_mode)
-     - useI18n().setLocale(user.preferences.locale)
-     - useActiveVertical().switchTo(user.preferences.active_vertical
-                                      ?? firstAvailableForUser())
-9. Install router (after verticals registered → tabs are in route table)
-10. app.mount("#app")  → <PlatformShell> renders
-11. Background: useStudioHealth() begins polling
+     - i18n.changeLanguage(user.preferences.locale)
+     - useVerticalsStore.getState().setActive(
+         user.preferences.active_vertical ?? firstAvailableForUser())
+7. Build router: createBrowserRouter([...])  # AFTER step 5 — vertical tabs are in the route table
+8. createRoot(document.getElementById("root")!).render(
+     <RouterProvider router={router} />
+   )
+9. Background: useStudioHealth() begins polling on first <StudioHealthIndicator> mount
 ```
 
-If step 6a returns 401: skip steps 7-8 (no user → no preferences); navigate to `/login`. After successful login (auth-service spec 03), restart from step 6a.
+If step 4a returns 401: skip steps 5-6 (no user → no preferences); navigate to `/login`. After successful login (auth-service spec 03), restart from step 4a.
+
+**Why step 7 is after step 5.** React Router's `createBrowserRouter` builds the route table once; vertical-contributed routes (mounted at `/<vertical_id>/...`) must be present in the route objects array at construction time, not added later. v0.2 may switch to dynamic route addition via React Router's `router.addRoutes` if it ships, but v0.1 builds-once.
+
+**Note on Zustand initialization.** Unlike Vue/Pinia, Zustand stores are module-level and initialize on first import. No `app.use(...)` step is needed for stores — they're "installed" implicitly. Likewise no provider component for the registry: components import the store hook directly and React subscribes via `useSyncExternalStore` under the hood.
 
 ---
 
 ## §11 Test matrix
 
-Every public composable + every layout slot + every route guard has tests. All tests run with Vitest + Vue Testing Library; substitution-eligible tests (those that exercise StudioClient indirectly) marked `[SUB]`.
+Every public hook + every layout slot + every route loader has tests. All tests run with Vitest + React Testing Library + jsdom; substitution-eligible tests (those that exercise StudioClient indirectly) marked `[SUB]`.
 
-### Composables
+### Hooks
 
-| scenario | composable | expected | test_id |
+| scenario | hook | expected | test_id |
 |---|---|---|---|
 | user authenticated | `useUser` | `is_authenticated: true`, `user.permissions` populated | `t_use_user_authed` |
 | user 401 mid-session | `useUser` after 401 from API | `signOut` called automatically; `is_authenticated: false` | `t_use_user_session_expired` |
 | StudioClient available | `useStudio` after boot | returns the configured client | `[SUB] t_use_studio_returns_client` |
 | StudioClient missing | `useStudio` before boot | throws "StudioClient not configured" | `t_use_studio_unconfigured` |
-| Health polling | `useStudioHealth(poll_interval_ms=100)` | 3 polls in 350 ms; `health` updates | `[SUB] t_use_studio_health_poll` |
+| Health polling | `useStudioHealth({poll_interval_ms: 100})` | 3 polls in 350 ms; `health` updates | `[SUB] t_use_studio_health_poll` |
 | Health error tolerated | poll raises `StudioUnavailable` | `error` set; previous `health` retained; polling continues | `[SUB] t_use_studio_health_error` |
-| Active vertical switch | `useActiveVertical().switchTo("v-b")` | active updates; URL changes; preferences persisted | `t_use_active_vertical_switch` |
+| Health unmount cancels | hook unmounted mid-interval | no further polls; in-flight aborted | `t_use_studio_health_unmount` |
+| Active vertical switch | `useActiveVertical().switchTo("v-b")` | active updates; URL changes via navigate(); preferences persisted | `t_use_active_vertical_switch` |
 | Single-vertical user | only one vertical available | switcher hidden; active set on boot | `t_use_active_vertical_single` |
 | Zero-vertical user | no verticals available | empty-state page rendered; sign-out link present | `t_use_active_vertical_zero` |
 | Notifications dedup | push twice with same `dedupe_key` within 5 min | one entry in list | `t_notifications_dedup` |
 | Notifications retention | push 60 notifications | only last 50 retained | `t_notifications_retention` |
 | Toast auto-dismiss | `useToast().show({duration_ms: 100})` | removed from DOM after 100 ms | `t_toast_dismiss` |
-| Permission grant | user has `platform:run_meeting` | `usePermission("platform:run_meeting").value === true` | `t_permission_grant` |
-| Permission deny | user missing permission | `usePermission(...).value === false` | `t_permission_deny` |
-| Permissions all-mode | user has 1 of 2 required | `usePermissions([...], "all").value === false` | `t_permissions_all_mode` |
-| Feature flag | flag set true at boot | `useFeatureFlag("x").value === true` | `t_feature_flag_true` |
+| Permission grant | user has `platform:run_meeting` | `usePermission("platform:run_meeting") === true` | `t_permission_grant` |
+| Permission deny | user missing permission | `usePermission(...) === false` | `t_permission_deny` |
+| Permissions all-mode | user has 1 of 2 required | `usePermissions([...], "all") === false` | `t_permissions_all_mode` |
+| Feature flag | flag set true at boot | `useFeatureFlag("x") === true` | `t_feature_flag_true` |
 | Feature flag default | flag absent | returns `default_value` | `t_feature_flag_default` |
-| Theme persistence | `useTheme().setMode("dark")` | preferences PUT called; `<html data-theme="dark">` | `t_theme_persists` |
+| Theme persistence | `useTheme().setMode("dark")` | preferences PATCH called; `<html data-theme="dark">` | `t_theme_persists` |
 | Theme system mode | `setMode("system")` with OS dark | resolved to "dark"; on OS change → re-applies | `t_theme_system_follows_os` |
 | Vertical accent color | active vertical declares `accent_color` | `--color-accent` CSS var matches | `t_theme_vertical_accent` |
-| i18n locale switch | `useI18n().setLocale("zh")` | preferences PUT; `t()` returns Chinese | `t_i18n_locale_switch` |
+| i18n locale switch | `useI18n().setLocale("zh")` | preferences PATCH; `t()` returns Chinese | `t_i18n_locale_switch` |
 | i18n missing key | `t("nonexistent.key")` | returns key in dev; logs warning | `t_i18n_missing_key` |
 | i18n vertical bundle | vertical merged keys | `t("vertical.v_a.tab.x")` returns vertical's value | `t_i18n_vertical_namespace` |
 
@@ -837,8 +970,8 @@ Every public composable + every layout slot + every route guard has tests. All t
 | authed root | `/` | authed | redirect to `/platform/dashboard` | `t_route_authed_root` |
 | login while authed | `/login` | authed | redirect to `/platform/dashboard` | `t_route_login_while_authed` |
 | permission denied route | `/platform/observability` | user missing `platform:view_observability` | redirect to `/platform/dashboard` + toast | `t_route_perm_denied` |
-| vertical URL switches active | `/v-b/tab-x` while v-a active | active becomes v-b before route mounts | `t_route_vertical_switches_active` |
-| unknown vertical | `/v-unknown/...` | any state | 404 page | `t_route_unknown_vertical` |
+| vertical URL switches active | `/v-b/tab-x` while v-a active | PlatformShell's useEffect calls switchTo before tab content renders | `t_route_vertical_switches_active` |
+| unknown vertical | `/v-unknown/...` | any state | 404 page (no matching route) | `t_route_unknown_vertical` |
 | catch-all | `/random/path` | any state | `<NotFound />` | `t_route_catch_all` |
 
 ### Boot sequence
@@ -882,10 +1015,10 @@ Every public composable + every layout slot + every route guard has tests. All t
   },
   "error": {
     "studio_unavailable": "Studio is unavailable. Some features may not work.",
-    "rate_limited": "Rate limited. Try again in {seconds} seconds.",
+    "rate_limited": "Rate limited. Try again in {{seconds}} seconds.",
     "integrity_incident": "A data integrity issue was detected. Engineering has been alerted.",
-    "meeting_failed": "Meeting {meeting_id} failed: {reason}",
-    "vertical_load_failure": "Failed to load vertical '{vertical_id}': {reason}"
+    "meeting_failed": "Meeting {{meeting_id}} failed: {{reason}}",
+    "vertical_load_failure": "Failed to load vertical '{{vertical_id}}': {{reason}}"
   },
   "permission": {
     "denied": "You don't have permission for that action."
@@ -898,15 +1031,15 @@ Every public composable + every layout slot + every route guard has tests. All t
 }
 ```
 
-`zh.json` mirrors with Chinese translations. Verticals MAY override platform keys by providing the same key under their `vertical.<id>.<key>` namespace; shell resolution prefers vertical-namespaced keys when present.
+`zh.json` mirrors with Chinese translations. Verticals MAY override platform keys by providing the same key under their `vertical.<id>.<key>` namespace; shell resolution prefers vertical-namespaced keys when present. Note: i18next interpolation uses `{{var}}` syntax (not Vue's `{var}`).
 
 ---
 
 ## §13 Why this design — consolidated load-bearing decisions
 
-**Why the shell exposes composables, not Pinia stores directly.**
-Composables are the public API; Pinia stores are implementation. Composables let us evolve the storage / source / caching strategy (e.g., move from Pinia to a Vuex-like or Zustand-like) without breaking every consumer. They also enforce a uniform call shape (`useX()` everywhere) regardless of underlying mechanism (some composables wrap Pinia, others wrap vue-i18n, others wrap inject/provide).
-*Considered and rejected.* **Export Pinia stores as the public API** — couples consumers to Pinia's exact reactive semantics; harder to mock in tests; mixes "use a store" with "use a service" in a single API.
+**Why the shell exposes hooks (not Zustand stores) directly to features.**
+Hooks are the public API; Zustand stores are implementation. Hooks let us evolve the storage / source / caching strategy (e.g., move from Zustand to Jotai or Recoil) without breaking every consumer. They also enforce a uniform call shape (`useX()` everywhere) regardless of underlying mechanism (some hooks wrap a Zustand store, others wrap react-i18next, others compute derived values).
+*Considered and rejected.* **Export Zustand stores as the public API** — couples consumers to Zustand's exact selector semantics; harder to mock in tests; mixes "use a store" with "use a service" in a single API.
 
 **Why `useStudio` returns the StudioClient directly, not a wrapped facade.**
 The StudioClient is already the public Protocol (`01-studio-client-spec.md`); wrapping it would re-introduce the contract drift risk we just eliminated by mirroring studio's frozen schemas. Features that need cross-cutting concerns (retries, telemetry) get them via `HttpStudioClient`'s sandwich layers (P7).
@@ -925,20 +1058,28 @@ They have different lifecycles: toasts auto-dismiss + are not historical; notifi
 *Considered and rejected.* **`useNotifications().push({persist: bool})`** — too easy to forget the flag; bad ergonomics for "show this and remember it" (the common case).
 
 **Why theming uses CSS variables + Tailwind data-theme, not a JS-driven theme provider.**
-CSS variables propagate without re-render; switching from light to dark is a single attribute write. JS theme providers (e.g., emotion / styled-components themes) re-render the entire tree on change.
+CSS variables propagate without re-render; switching from light to dark is a single attribute write. JS theme providers (e.g., Emotion / styled-components themes) re-render the entire tree on change.
 *Considered and rejected.* **CSS-in-JS theme provider** — performance cost on every theme toggle.
 
+**Why React Router v6 data API (`createBrowserRouter`), not the older declarative `<Routes>`.**
+Data API supports loaders + actions, which give us per-route auth + permission gating without wrapper components everywhere. Loaders run BEFORE rendering, enabling clean redirects via the `redirect()` response. The legacy declarative `<Routes>` would push guards into wrapper components, polluting the component tree.
+*Considered and rejected.* **Declarative `<Routes>` + per-feature wrapper guards** — wrapper soup. **TanStack Router** — newer + powerful but adds a non-canonical dep; React Router v6 is the canonical choice + its data API covers our needs.
+
 **Why the boot sequence is fixed, not pluggable.**
-The order matters: StudioClient must exist before `useStudio()` is called by any vertical's manifest registration; user preferences must load before active vertical is resolved; verticals must register before the router mounts. Pluggable boot would let some vertical's plugin reorder steps and break invariants.
+The order matters: StudioClient must exist before `useStudio()` is called by any vertical's manifest registration; user preferences must load before active vertical is resolved; verticals must register before the router is built. Pluggable boot would let some vertical's plugin reorder steps and break invariants.
 *Considered and rejected.* **Plugin-controlled boot** — over-engineering; v0.1 has no use case.
 
-**Why `useMeetingStreamStore` lives in shell, not in agora.**
+**Why `useMeetingStreamRegistry` lives in shell, not in agora.**
 Per `01b-product-derivations-spec.md` §9: chathub also consumes meeting streams (single-agent meetings); putting the store in agora would force chathub to import agora's namespace just to subscribe to a stream.
 *Considered and rejected.* **Store in agora** — already covered in 01b's Why section.
 
 **Why active-vertical switching does NOT tear down meeting subscriptions.**
-A user might be observing a meeting in vertical A, switch to vertical B briefly to check something, switch back. Tearing down + re-subscribing on each switch is wasteful and loses any in-flight events between unsubscribe and re-subscribe. Reference-counted subscriptions in `useMeetingStreamStore` handle this naturally.
+A user might be observing a meeting in vertical A, switch to vertical B briefly to check something, switch back. Tearing down + re-subscribing on each switch is wasteful and loses any in-flight events between unsubscribe and re-subscribe. Reference-counted subscriptions in `useMeetingStream` handle this naturally — components unmount but the registry slice persists until the next subscriber.
 *Considered and rejected.* **Vertical switch = full meeting unsubscribe** — bad UX.
+
+**Why Zustand (vs Redux Toolkit / Jotai / Recoil / Context-only).**
+Zustand offers store-as-hook with minimal boilerplate; closest match to the prior Pinia design's spirit. Selector-based subscriptions ensure components only re-render on the slices they read. Module-level instantiation (no provider needed) keeps the boot sequence simple. Redux Toolkit was rejected as too heavy (action/reducer/slice ceremony for shell-scale state). Jotai's atom model would diverge from the "one store per concern" mental model the rest of the spec assumes. React Context alone re-renders all consumers on any change, defeating fine-grained reactivity.
+*Considered and rejected.* **Redux Toolkit** — boilerplate. **Jotai** — atom model is a different mental shift. **React Context only** — over-renders.
 
 ---
 
@@ -948,11 +1089,11 @@ A user might be observing a meeting in vertical A, switch to vertical B briefly 
 |---|---|
 | `03-auth-service-spec.md` | Defines `GET /api/auth/me` shape (User payload), permission model (string codes), session lifecycle. Shell reads these unchanged. |
 | `04-user-service-spec.md` | Defines `GET/PUT /api/user/preferences` (UserPreferences shape). Shell reads / debounces writes. |
-| `05`–`12` (every feature spec) | Each feature's spec declares its routes (under `/platform/<feature>/...`), required permissions, i18n bundle, and any composables it adds. Each feature CONSUMES the shell's composables and `<PermissionGate>` for UI gating. |
-| `13-vertical-template-spec.md` | The `_template/` package's `frontend/manifest.ts` MUST conform to the `VerticalManifest` interface defined here (§3.1). Includes the validation requirements + a sample manifest. |
+| `05`–`12` (every feature spec) | Each feature's spec declares its routes (under `/platform/<feature>/...`), required permissions, i18n bundle, and any hooks it adds. Each feature CONSUMES the shell's hooks and `<PermissionGate>` for UI gating. |
+| `13-vertical-template-spec.md` | The `_template/` package's `frontend/manifest.ts` MUST conform to the `VerticalManifest` interface defined here (§3.1). Includes the validation requirements + a sample manifest. Component types MUST be React, not Vue. |
 | `14-...` (first concrete vertical) | Same — must conform. Adds `accent_color` if vertical has one; declares permissions, project_id_in allowlist. |
 | `15-apps-api-spec.md` | Defines `GET /api/platform/verticals` and `GET /api/platform/feature-flags` endpoints (consumed by shell at boot per §10). |
-| `16-apps-frontend-spec.md` | Defines `apps/frontend/main.ts` boot script following §10's order; configures StudioClient (env-driven); installs Pinia / vue-i18n / shell. |
+| `16-apps-frontend-spec.md` | Defines `apps/frontend/main.tsx` boot script following §10's order; configures StudioClient (env-driven); initializes i18next; mounts `<RouterProvider>`. |
 | `17-substitution-tests-spec.md` | Substitution tests cover all `[SUB]`-marked rows in §11 (boot, useStudio, useStudioHealth). |
 
 ---
@@ -960,24 +1101,24 @@ A user might be observing a meeting in vertical A, switch to vertical B briefly 
 ## §15 Pre-merge checklist
 
 - [ ] Mission + Scope present; "out of scope for v0.1" listed (hot-reload, multi-tenant, theme authoring, cross-tab sync, offline)
-- [ ] Module layout (§1) enumerates every file the shell ships
-- [ ] All 11 public composables (§2) documented with full TS signature, source, reactivity rule, lifecycle
-- [ ] `VerticalManifest` (§3.1) interface complete with all 5 contribution types + `default_project_filter` (per `01-studio-client` §11.4) + i18n + accent_color
+- [ ] Module layout (§1) enumerates every file the shell ships; React file extensions (.tsx) used
+- [ ] All 11 public hooks (§2) documented with full TS signature, source store, reactivity rule, lifecycle
+- [ ] `VerticalManifest` (§3.1) interface complete with all 5 contribution types + `default_project_filter` (per `01-studio-client` §11.4) + i18n + accent_color; component types use `React.ComponentType` / `LazyExoticComponent`
 - [ ] `registerVertical` (§3.2) declares its 8 behaviors + `VerticalRegistrationError` type with all 5 reasons
 - [ ] Boot-time discovery flow (§3.3) pinned to the apps/frontend boot path; no filesystem scan
-- [ ] Route table (§4) lists every route the shell registers; guards (§4.1) declare auth + permission + vertical-active
+- [ ] Route table (§4) lists every route the shell registers; loaders (§4.1) declare auth + permission; vertical-active resolution in `<PlatformShell>` Layout component
 - [ ] Theming (§5) covers tokens, apply mechanism, per-vertical accent, font stack
-- [ ] i18n (§6) covers engine, bundle structure, vertical merge mechanism, feature merge mechanism
+- [ ] i18n (§6) covers engine (i18next), bundle structure, vertical merge mechanism (`addResourceBundle`), feature merge mechanism, interpolation syntax (`{{var}}`)
 - [ ] Notifications (§7) covers store shape, sources, toast vs notification distinction, dedup, retention, studio-error mapping
-- [ ] Permissions (§8) covers format convention, source, `<PermissionGate>` API, hide-on-deny behavior
-- [ ] Layout components (§9) enumerated with slot structure
-- [ ] Boot sequence (§10) is the authoritative ordering for `apps/frontend/main.ts`
-- [ ] Test matrix (§11) covers every composable, every registration scenario, every route guard, every boot scenario; substitution-eligible tests marked `[SUB]`
-- [ ] i18n strings (§12) lists every user-visible key with `en` value (Chinese mirror documented separately in shell's repo)
-- [ ] Why-this / Why-not blocks (§13) for every load-bearing decision (≥ 8)
+- [ ] Permissions (§8) covers format convention, source, `<PermissionGate>` API with children + fallback prop, hide-on-deny behavior
+- [ ] Layout components (§9) enumerated with slot structure and `<Outlet>` + `<Suspense>` for lazy routes
+- [ ] Boot sequence (§10) is the authoritative ordering for `apps/frontend/main.tsx`; notes Zustand module-level init (no provider)
+- [ ] Test matrix (§11) covers every hook, every registration scenario, every route loader, every boot scenario; substitution-eligible tests marked `[SUB]`
+- [ ] i18n strings (§12) lists every user-visible key with `en` value (Chinese mirror documented separately in shell's repo); interpolation uses i18next `{{var}}` syntax
+- [ ] Why-this / Why-not blocks (§13) for every load-bearing decision (≥ 11 documented including Zustand choice + React Router data API choice)
 - [ ] Downstream impact (§14) lists every spec affected
 - [ ] No business / domain / product / agent-role string literal anywhere (uses neutral `vertical-a`, `v-b`, etc.)
 - [ ] No `from entelecheia` / `import entelecheia`
-- [ ] No `dict[str, Any]` / `Record<string, any>` / `unknown` without inline justification (used `Record<string, string>` for i18n bundles which is intentional and typed-as-such)
+- [ ] No `Record<string, any>` / `unknown` / `any` without inline justification (used `Record<string, string>` for i18n bundles which is intentional and typed-as-such)
 - [ ] `bash scripts/check-purity.sh` exits 0
 - [ ] File path matches `docs/specs/v0.1/02-platform-shell-spec.md`
