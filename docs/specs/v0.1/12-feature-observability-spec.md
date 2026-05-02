@@ -1,9 +1,10 @@
 # 12 — `observability` feature v0.1 spec
 
-> **Status**: v0.1 contract for the observability dashboards feature.
+> **Status**: v0.1 contract for the observability dashboards feature (React).
 > **Lives at**: `packages/platform-features/observability/`.
-> **Consumes**: `01-studio-client-spec.md` §7.6 (`list_meetings`), §7.10 (`get_cost_report`); `02-platform-shell-spec.md` (composables + routing + permissions); `03-auth-service-spec.md` (`platform:view_observability`).
+> **Consumes**: `01-studio-client-spec.md` §7.6 (`list_meetings`), §7.10 (`get_cost_report`); `02-platform-shell-spec.md` (hooks + routing + permissions); `03-auth-service-spec.md` (`platform:view_observability`).
 > **Forwarded to from**: `02-platform-shell-spec.md` sidebar nav.
+> **Supersedes**: the Vue version of this spec; React migration per session decision 2026-05-03.
 
 ---
 
@@ -21,20 +22,20 @@ This file defines the observability feature — the read-only dashboards where u
 - Module layout (frontend feature only; no backend).
 - 2 routes: `/platform/observability` (defaults to Cost tab), `/platform/observability/:tab` (direct link to one of `cost`, `activity`, `errors`).
 - Top-level `<ObservabilityView>` with 3 tab views: `<CostView>`, `<ActivityView>`, `<ErrorsView>`.
-- 3 chart components (Chart.js-backed): `<LineChart>`, `<BarChart>`, `<DonutChart>`.
+- 3 chart components (Chart.js-backed via `react-chartjs-2`): `<LineChart>`, `<BarChart>`, `<DonutChart>`.
 - Time range picker (4 presets + custom) shared across all 3 views; URL-synced.
-- 3 composables: `useCostReportData`, `useMeetingActivity`, `useTimeRange`.
+- 3 hooks: `useCostReportData`, `useMeetingActivity`, `useTimeRange`.
 - CSV export of raw rows from any chart.
 - Per-view loading / empty / error states with partial-failure tolerance.
 - Forward-compat for new studio enum values (`MeetingStatus`, `error_class` strings, `concluded_by`).
-- Test matrix per view + per chart + per composable.
+- Test matrix per view + per chart + per hook.
 - v0.2 path documented: server-side aggregation when client-side scaling hurts; switching never breaks the UI shape.
 
 **Does not cover.**
 - Live cost during an active meeting — `01b-product-derivations-spec.md` §5 `useCostState` (consumed by agora's CostPanel per `05-feature-agora-spec.md` §5.5).
 - Cost ledger writes — studio-only (per `01` §7.10 read-only).
 - Per-vertical breakdowns — possible via `vertical_id` in `get_cost_report` filters, but UI surfacing deferred to v0.2 once the verticalization story matures.
-- Per-event-type analytics on the 24 EventType stream — out of v0.1; `total_turns` from outcome + `MessageEmitted` / `ToolCalled` counts (which agora's CostState tracks per-meeting) cover v0.1 needs.
+- Per-event-type analytics on the 26 EventType stream — out of v0.1; `total_turns` from outcome + `MessageEmitted` / `ToolCalled` counts (which agora's CostState tracks per-meeting) cover v0.1 needs.
 - Email digest of weekly costs.
 - Anomaly detection / alert rules.
 - Custom saved dashboards / pinned filters.
@@ -56,29 +57,31 @@ This file defines the observability feature — the read-only dashboards where u
 packages/platform-features/observability/
 ├── src/
 │   ├── index.ts                              # exports ObservabilityView + observabilityRoutes
-│   ├── ObservabilityView.vue                 # top-level
+│   ├── ObservabilityView.tsx                 # top-level
 │   ├── components/
-│   │   ├── ObservabilityHeader.vue           # time range picker + refresh button
-│   │   ├── ObservabilityTabs.vue             # 3-tab navigation
-│   │   ├── TimeRangePicker.vue               # presets + custom range
-│   │   ├── ExportButton.vue                  # CSV download
-│   │   ├── EmptyState.vue
+│   │   ├── ObservabilityHeader.tsx           # time range picker + refresh button
+│   │   ├── ObservabilityTabs.tsx             # 3-tab navigation
+│   │   ├── TimeRangePicker.tsx               # presets + custom range
+│   │   ├── ExportButton.tsx                  # CSV download
+│   │   ├── EmptyState.tsx
 │   │   ├── views/
-│   │   │   ├── CostView.vue                  # tab: cost
-│   │   │   ├── ActivityView.vue              # tab: activity
-│   │   │   └── ErrorsView.vue                # tab: errors
+│   │   │   ├── CostView.tsx                  # tab: cost
+│   │   │   ├── ActivityView.tsx              # tab: activity
+│   │   │   └── ErrorsView.tsx                # tab: errors
 │   │   ├── charts/
-│   │   │   ├── LineChart.vue                 # Chart.js line; for time series
-│   │   │   ├── BarChart.vue                  # Chart.js bar; for breakdowns
-│   │   │   └── DonutChart.vue                # Chart.js doughnut; for share/mix
+│   │   │   ├── LineChart.tsx                 # react-chartjs-2 line; for time series
+│   │   │   ├── BarChart.tsx                  # react-chartjs-2 bar; for breakdowns
+│   │   │   └── DonutChart.tsx                # react-chartjs-2 doughnut; for share/mix
 │   │   └── tables/
-│   │       ├── CostBreakdownTable.vue
-│   │       ├── TopProjectsTable.vue
-│   │       └── FailedMeetingsTable.vue
-│   ├── composables/
+│   │       ├── CostBreakdownTable.tsx
+│   │       ├── TopProjectsTable.tsx
+│   │       └── FailedMeetingsTable.tsx
+│   ├── hooks/
 │   │   ├── useCostReportData.ts              # wraps studio.get_cost_report
 │   │   ├── useMeetingActivity.ts             # wraps list_meetings + client-side aggregation
 │   │   └── useTimeRange.ts                   # reactive time range + URL sync
+│   ├── store/
+│   │   └── useObservabilityCache.ts          # Zustand: per-session result cache (30 s stale)
 │   ├── routes.ts
 │   ├── permissions.ts
 │   └── i18n/
@@ -88,7 +91,7 @@ packages/platform-features/observability/
 └── package.json
 ```
 
-**No backend in this package.** Every fetch goes through `useStudio()`.
+**No backend in this package.** Every fetch goes through `useStudio()` (the shell hook returning `StudioClient`).
 
 ### 1.1 Permissions declared
 
@@ -107,30 +110,38 @@ export const OBSERVABILITY_PERMISSIONS = [
 
 ```typescript
 // packages/platform-features/observability/src/routes.ts
-import type { RouteRecordRaw } from "vue-router";
+import { lazy } from "react";
+import type { RouteObject } from "react-router-dom";
+import { redirect } from "react-router-dom";
+import { makePermissionsLoader } from "@platform/shell/router/loaders";
 
 export const OBSERVABILITY_TABS = ["cost", "activity", "errors"] as const;
 export type ObservabilityTab = typeof OBSERVABILITY_TABS[number];
 
-export const observabilityRoutes: RouteRecordRaw[] = [
+const ObservabilityView = lazy(() => import("./ObservabilityView"));
+
+const requiresViewObservability = makePermissionsLoader(["platform:view_observability"]);
+
+export const observabilityRoutes: RouteObject[] = [
   {
     path: "/platform/observability",
-    name: "observability",
-    component: () => import("./ObservabilityView.vue"),
-    meta: { required_permissions: ["platform:view_observability"], title_key: "feature.observability.title" },
-    redirect: { name: "observability-tab", params: { tab: "cost" } },
+    loader: async (args) => {
+      await requiresViewObservability(args);
+      throw redirect("/platform/observability/cost");
+    },
   },
   {
     path: "/platform/observability/:tab",
-    name: "observability-tab",
-    component: () => import("./ObservabilityView.vue"),
-    meta: { required_permissions: ["platform:view_observability"], title_key: "feature.observability.title" },
-    props: true,
-    beforeEnter(to) {
-      if (!OBSERVABILITY_TABS.includes(to.params.tab as ObservabilityTab)) {
-        return { name: "observability-tab", params: { tab: "cost" } };
+    loader: async (args) => {
+      await requiresViewObservability(args);
+      const tab = args.params.tab ?? "";
+      if (!OBSERVABILITY_TABS.includes(tab as ObservabilityTab)) {
+        throw redirect("/platform/observability/cost");
       }
+      return null;
     },
+    handle: { title_key: "feature.observability.title" },
+    Component: ObservabilityView,
   },
 ];
 ```
@@ -142,26 +153,48 @@ export const observabilityRoutes: RouteRecordRaw[] = [
 ### 2.1 `<ObservabilityView>` contract
 
 ```typescript
-export default defineComponent({
-  props: {
-    tab: { type: String as PropType<ObservabilityTab>, default: "cost" },
-  },
-  setup(props) {
-    const router = useRouter();
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useTimeRange } from "./hooks/useTimeRange";
+import type { ObservabilityTab } from "./routes";
+import { OBSERVABILITY_TABS } from "./routes";
 
-    // Time range — shared across tabs; URL-synced
-    const { range, setPreset, setCustom, sinceISO, untilISO } = useTimeRange();
+export default function ObservabilityView() {
+  const { tab: rawTab } = useParams<{ tab: string }>();
+  const tab = (OBSERVABILITY_TABS.includes(rawTab as ObservabilityTab)
+    ? rawTab
+    : "cost") as ObservabilityTab;
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-    function setTab(t: ObservabilityTab) {
-      router.push({ name: "observability-tab", params: { tab: t }, query: router.currentRoute.value.query });
-    }
+  // Time range — shared across tabs; URL-synced (the hook owns the search-param sync)
+  const { range, sinceISO, untilISO, setPreset, setCustom, refresh } = useTimeRange();
 
-    return { range, setPreset, setCustom, sinceISO, untilISO, setTab };
-  },
-});
+  function setTab(t: ObservabilityTab) {
+    // preserve current query (range params) when switching tabs
+    const qs = searchParams.toString();
+    navigate(qs ? `/platform/observability/${t}?${qs}` : `/platform/observability/${t}`);
+  }
+
+  return (
+    <div className="observability-view">
+      <ObservabilityHeader
+        range={range}
+        onSetPreset={setPreset}
+        onSetCustom={setCustom}
+        onRefresh={refresh}
+      />
+      <ObservabilityTabs active={tab} onChange={setTab} />
+      <main>
+        {tab === "cost"     && <CostView     since={sinceISO} until={untilISO} />}
+        {tab === "activity" && <ActivityView since={sinceISO} until={untilISO} />}
+        {tab === "errors"   && <ErrorsView   since={sinceISO} until={untilISO} />}
+      </main>
+    </div>
+  );
+}
 ```
 
-Renders header (time range + refresh) + tabs nav + active tab view. Active view is dynamically imported (Cost / Activity / Errors).
+Renders header (time range + refresh) + tabs nav + active tab view. `refresh()` (from `useTimeRange`) bumps a shared "refresh epoch" that all panels' hooks subscribe to.
 
 ### 2.2 Status states
 
@@ -172,7 +205,7 @@ Renders header (time range + refresh) + tabs nav + active tab view. Active view 
 | `partial_failure` | one of multiple parallel fetches failed; others succeeded | render available; per-panel error banner for failed |
 | `total_failure` | every fetch in this view failed | full-view error banner with retry |
 | `empty` | data fetched OK but no rows | empty-state per panel ("No cost data for this range.") |
-| `permission_denied` | user lacks permission (route guard) | redirected to dashboard with toast (per `02` §4.1) |
+| `permission_denied` | user lacks permission (route loader) | redirected to dashboard with toast (per `02` §4.1) |
 
 ---
 
@@ -226,10 +259,8 @@ Data: `useCostReportData({ since, until, group_by: [] })` — single CostReport,
 interface CostByDimensionProps {
   since: string;
   until: string;
-  dimension: CostGroupByDimension;     // "project_id" | "user_id" | "agent_id" | "skill_id" | "model_id" | "kind"
-}
-interface CostByDimensionEmits {
-  (e: "update:dimension", v: CostGroupByDimension): void;
+  dimension: CostGroupByDimension;     // see §6.1
+  onDimensionChange: (d: CostGroupByDimension) => void;
 }
 ```
 
@@ -237,6 +268,8 @@ Renders:
 - Dropdown to pick dimension (7 choices: project / meeting / user / agent / skill / model / kind).
 - `<BarChart>` showing cost per dimension value (top 10 by cost; "+ N more" link to expand).
 - `<CostBreakdownTable>` below the chart with full rows + ExportButton.
+
+The selected dimension is held in local React state (`useState`) inside `<CostView>` and threaded down via prop; not URL-persisted in v0.1 (URL state for one panel knob doesn't pay off).
 
 Data: `useCostReportData({ since, until, group_by: [dimension] })`.
 
@@ -286,7 +319,7 @@ interface FailedMeetingsProps {
 
 `<FailedMeetingsTable>` listing failed meetings (status=failed) sorted by `started_at` desc. Columns: meeting_id, project, user, started_at, error_class, error_message (truncated). Each row links to `/platform/agora/<meeting_id>` (where the failure banner per `05` §3.2 explains).
 
-Data: `useMeetingActivity({ since, until }).failed_meetings.value`.
+Data: `useMeetingActivity({ since, until }).data?.failed_meetings`.
 
 #### Panel B — Error type breakdown
 
@@ -294,11 +327,11 @@ Data: `useMeetingActivity({ since, until }).failed_meetings.value`.
 
 ---
 
-## §5 Charts (Chart.js wrappers)
+## §5 Charts (`react-chartjs-2` wrappers)
 
-### 5.1 Library choice — Chart.js
+### 5.1 Library choice — `chart.js` + `react-chartjs-2`
 
-**Why Chart.js.** Mature, batteries-included (legend, tooltip, responsive sizing), ~80 KB minified-gzipped, MIT-licensed, no native deps. Covers line / bar / doughnut without custom drawing code. Bundle hit acceptable for an internal admin-grade feature.
+**Why Chart.js.** Mature, batteries-included (legend, tooltip, responsive sizing), ~80 KB minified-gzipped, MIT-licensed, no native deps. Covers line / bar / doughnut without custom drawing code. Bundle hit acceptable for an internal admin-grade feature. The `react-chartjs-2` wrapper (~5 KB) handles React lifecycle binding (mount → init, unmount → destroy, props change → update) so we don't have to write `useEffect` glue per chart.
 
 **Why not D3** (which agora already uses). D3 gives lower-level control but requires significant glue for axes / legends / tooltips for each chart type. Cost-vs-benefit tilts to Chart.js for plain dashboards. v0.2 may consolidate to one library if perf or bundle concerns warrant.
 
@@ -306,27 +339,43 @@ Data: `useMeetingActivity({ since, until }).failed_meetings.value`.
 
 ### 5.2 Wrapper component contract
 
-Each chart is a minimal Vue wrapper around Chart.js. All three follow the same shape:
+Each chart is a thin React wrapper around `react-chartjs-2`. All three follow the same shape:
 
 ```typescript
+import { Line } from "react-chartjs-2";
+import type { ChartData, ChartOptions } from "chart.js";
+
 interface LineChartProps {
   data: { labels: string[]; series: { name: string; values: number[] }[] };
   unit: string;            // "USD" | "count" | etc.; shown in axis label + tooltip
-  height: number;          // px; default 240
-  on_empty?: "spinner" | "empty_state" | "hide";  // default "empty_state"
+  height?: number;         // px; default 240
+  onEmpty?: "spinner" | "empty_state" | "hide";  // default "empty_state"
 }
-// no emits
+
+export function LineChart({ data, unit, height = 240, onEmpty = "empty_state" }: LineChartProps) {
+  if (data.series.length === 0 || data.series.every(s => s.values.length === 0)) {
+    return <ChartPlaceholder kind={onEmpty} />;
+  }
+  const { t, i18n } = useTranslation();
+  const chartData = useMemo<ChartData<"line">>(() => buildLineData(data, i18n.language), [data, i18n.language]);
+  const options   = useMemo<ChartOptions<"line">>(() => buildLineOptions(unit, i18n.language), [unit, i18n.language]);
+  return (
+    <div style={{ height }}>
+      <Line data={chartData} options={options} />
+    </div>
+  );
+}
 ```
 
-`<BarChart>` and `<DonutChart>` mirror with their data shape.
+`<BarChart>` and `<DonutChart>` mirror with their data shape and the corresponding `Bar` / `Doughnut` import.
 
 **Render rules.**
-- Empty data → render the configured `on_empty` placeholder (default empty state).
-- Loading state — wrapper has its own `is_loading` slot used by parent.
-- Resize observed via `ResizeObserver`; chart redraws (debounced 150 ms).
-- Tooltip formats values via `Intl.NumberFormat` (locale from `useI18n().locale.value`).
-- Color palette: hardcoded sequential 8-color palette in `theme/charts.ts`; theme-aware (light / dark variants per `02` §5).
-- Print mode: charts honor `prefers-reduced-motion` (no animations).
+- Empty data → render the configured `onEmpty` placeholder (default empty state).
+- Loading state — parent renders `<Skeleton>` instead of the chart; the chart itself does not own a loading state.
+- Resize handled by Chart.js's `responsive: true` option (the wrapper reads its container size on each resize event; debounced internally).
+- Tooltip formats values via `Intl.NumberFormat(locale)`.
+- Color palette: hardcoded sequential 8-color palette in `theme/charts.ts`; theme-aware (light / dark variants per `02` §5). The wrapper subscribes to `useTheme().resolved` and re-renders with the new palette on theme change.
+- Animation: respects `prefers-reduced-motion` (Chart.js option `animation: false` when matched).
 
 ### 5.3 Per-chart minimal config
 
@@ -336,9 +385,31 @@ interface LineChartProps {
 | `<BarChart>` | `bar` | X = dimension value, Y = unit | `{label}: {value} {unit}` |
 | `<DonutChart>` | `doughnut` | (no axes) | `{label}: {value} {unit} ({percent}%)` |
 
+### 5.4 chart.js global registration
+
+`react-chartjs-2` requires explicit Chart.js registration to keep tree-shaking honest. The observability package registers exactly what it uses, in one module loaded on first chart render:
+
+```typescript
+// packages/platform-features/observability/src/components/charts/register.ts
+import { Chart, LineController, LineElement, PointElement, BarController, BarElement,
+         DoughnutController, ArcElement, CategoryScale, LinearScale, Tooltip, Legend } from "chart.js";
+
+let registered = false;
+export function ensureChartsRegistered() {
+  if (registered) return;
+  Chart.register(LineController, LineElement, PointElement,
+                 BarController, BarElement,
+                 DoughnutController, ArcElement,
+                 CategoryScale, LinearScale, Tooltip, Legend);
+  registered = true;
+}
+```
+
+Each chart wrapper calls `ensureChartsRegistered()` at the top.
+
 ---
 
-## §6 Composables
+## §6 Hooks
 
 ### 6.1 `useCostReportData`
 
@@ -358,21 +429,63 @@ export interface CostReportFilters {
   kind?:       string;
 }
 
-export function useCostReportData(filters: Ref<CostReportFilters>): {
-  report:    ComputedRef<CostReport | null>;
-  isLoading: ComputedRef<boolean>;
-  error:     ComputedRef<string | null>;
+export interface UseCostReportData {
+  report:    CostReport | null;
+  isLoading: boolean;
+  error:     string | null;
   refresh:   () => Promise<void>;
-};
+}
+
+export function useCostReportData(filters: CostReportFilters): UseCostReportData {
+  // ... see Behavior below
+}
 ```
 
 **Behavior.**
-1. On mount + on `filters` change (deep watch): `studio.get_cost_report(filters.value)`.
-2. Cache by JSON-stringified filters in a per-session Pinia store; identical filters within 30 s → returned from cache.
+1. On mount + on `filters` change (deep-compared via `JSON.stringify`-keyed memo): call `studio.get_cost_report(filters)`.
+2. Cache by JSON-stringified filters in `useObservabilityCache` (Zustand, session-scoped); identical filters within 30 s → returned from cache.
 3. Stale time: 30 s. Beyond → re-fetch on next access.
-4. Manual `refresh()` bypasses cache.
+4. Manual `refresh()` bypasses cache (and bumps the shared refresh epoch from §2.1, so peer hooks also re-fetch).
+5. Subscribes to the refresh epoch from the cache store; when bumped, re-fetches automatically.
 
-**Fetch errors** stored in `error` ref (localized message); `report` becomes null; UI shows panel-level error.
+**Implementation sketch.**
+```typescript
+export function useCostReportData(filters: CostReportFilters): UseCostReportData {
+  const studio = useStudio();
+  const cacheKey = useMemo(() => `cost:${JSON.stringify(filters)}`, [filters]);
+  const epoch = useObservabilityCache(s => s.epoch);
+  const cached = useObservabilityCache(s => s.entries.get(cacheKey));
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchNow = useCallback(async (bypass = false) => {
+    if (!bypass && cached && Date.now() - cached.fetched_at_ms < 30_000) return;
+    setIsLoading(true);
+    setError(null);
+    const ctrl = new AbortController();
+    try {
+      const report = await studio.get_cost_report(filters, { signal: ctrl.signal });
+      useObservabilityCache.getState().put(cacheKey, report);
+    } catch (e) {
+      setError(mapErrorToLocalized(e));
+    } finally {
+      setIsLoading(false);
+    }
+    return () => ctrl.abort();
+  }, [studio, cacheKey, filters, cached]);
+
+  useEffect(() => { void fetchNow(false); }, [fetchNow, epoch]);
+
+  return {
+    report: (cached?.value as CostReport | null) ?? null,
+    isLoading,
+    error,
+    refresh: () => fetchNow(true),
+  };
+}
+```
+
+**Fetch errors** stored in `error` state (localized); `report` stays at last successful value (so the UI doesn't flash empty during refresh failure); UI shows panel-level error banner above stale data.
 
 **Cache strategy rationale.** Time-range data is immutable for the past; the small cache window makes tab-switching fast without showing stale data after the user explicitly refreshes.
 
@@ -393,29 +506,32 @@ export interface MeetingActivityData {
   top_projects:    { project_id: string; count: number }[];   // top 10
 }
 
-export function useMeetingActivity(filters: Ref<MeetingActivityFilters>): {
-  data:      ComputedRef<MeetingActivityData | null>;
-  isLoading: ComputedRef<boolean>;
-  error:     ComputedRef<string | null>;
+export interface UseMeetingActivity {
+  data:      MeetingActivityData | null;
+  isLoading: boolean;
+  error:     string | null;
   refresh:   () => Promise<void>;
-};
+}
+
+export function useMeetingActivity(filters: MeetingActivityFilters): UseMeetingActivity;
 ```
 
 **Behavior.**
-1. On mount + filters change: paginated `studio.list_meetings({ since, limit: 500, offset: 0/500/...})` until empty page.
+1. On mount + filters change: paginated `studio.list_meetings({ since, until, limit: 500, cursor: ...})` until empty page (cursor returned per `01` §7.6).
 2. Aggregate client-side:
-   - by_day buckets by `started_at`'s date (UTC).
-   - by_status counts by `status`.
-   - failed_meetings filters where `status === "failed"`.
-   - by_error_class buckets `failed_meetings[*].error_class` (defensively reads from MeetingStatus per `01` §5.4; `MeetingSummary` doesn't include error_class — see §6.3 for the workaround).
-   - top_projects counts by `project_id`, sorted desc, top 10.
-3. Cache + stale-time same as `useCostReportData`.
+   - `by_day` buckets by `started_at`'s date (UTC).
+   - `by_status` counts by `status`.
+   - `failed_meetings` filters where `status === "failed"`.
+   - `by_error_class` buckets `failed_meetings[*].error_class` (defensively reads from MeetingStatus per `01` §5.4; `MeetingSummary` doesn't include `error_class` — see §6.3).
+   - `top_projects` counts by `project_id`, sorted desc, top 10.
+3. Cache + stale-time same as `useCostReportData`; uses the same `useObservabilityCache` store with key `meetings:${JSON.stringify(filters)}`.
+4. Cleanup: AbortController per request; aborted on unmount or filter change to avoid setting state after unmount.
 
 **Hard cap.** If `list_meetings` returns > 5000 rows in the range, abort + show "too much data; narrow time range." Acceptable degradation (operations would split into smaller queries).
 
 ### 6.3 Error class enrichment workaround
 
-`MeetingSummary` (per `01` §5.3) does NOT carry `error_class`. To populate `by_error_class`, `useMeetingActivity` does an additional `studio.get_meeting_status({meeting_id: m})` call for **only the failed meetings** (typically a small fraction). Concurrent (up to 8); cached per session.
+`MeetingSummary` (per `01` §5.3) does NOT carry `error_class`. To populate `by_error_class`, `useMeetingActivity` does an additional `studio.get_meeting_status({meeting_id: m})` call for **only the failed meetings** (typically a small fraction). Concurrent (up to 8 in flight; implemented with a small p-limit-style semaphore inside the hook); cached per session.
 
 If the failed meeting count > 100 (pathological), only the first 100 by `started_at` desc are enriched; remainder counted as `"unknown"` in the donut with a footer note.
 
@@ -432,18 +548,21 @@ export interface TimeRangeState {
   custom_to:   string | null;
 }
 
-export function useTimeRange(): {
-  range:     Ref<TimeRangeState>;
-  sinceISO:  ComputedRef<string>;          // resolves preset → concrete ISO
-  untilISO:  ComputedRef<string>;
+export interface UseTimeRange {
+  range:     TimeRangeState;
+  sinceISO:  string;          // resolves preset → concrete ISO
+  untilISO:  string;
   setPreset: (p: TimeRangePreset) => void;
   setCustom: (from: string, to: string) => void;
-};
+  refresh:   () => void;       // bumps the shared epoch in useObservabilityCache
+}
+
+export function useTimeRange(): UseTimeRange;
 ```
 
-**URL sync.** Time range state serialized to `route.query` as `?range=last_7d` or `?range=custom&from=...&to=...`. Default: `last_7d`.
+**URL sync.** Time range state serialized to query string as `?range=last_7d` or `?range=custom&from=...&to=...`. Default: `last_7d`. The hook reads via `useSearchParams` and writes via `setSearchParams({...}, { replace: true })` to avoid polluting browser history with every preset toggle.
 
-**Reactivity.** `sinceISO` / `untilISO` recompute when `range` changes. Charts watch these via composable filters.
+**Reactivity.** `sinceISO` / `untilISO` recompute whenever `range` changes. Charts watch these via hook filters (each panel hook is re-keyed by the ISO strings).
 
 ---
 
@@ -456,7 +575,9 @@ interface ExportButtonProps {
   filename: string;     // suggests download name
   data:     unknown[];  // rows; serialized via Object.keys → header row, then values
   // optional: column_order to enforce header column order
-  column_order?: string[];
+  columnOrder?: string[];
+  disabled?: boolean;
+  disabledReason?: string;     // tooltip when disabled
 }
 ```
 
@@ -479,7 +600,7 @@ interface ExportButtonProps {
 | Activity | skeleton chart + skeleton table | "No meeting activity in this range." | same | same |
 | Errors | skeleton table + skeleton donut | "No failures in this range. 🎉" | same | same |
 
-Refresh button at top: re-fetches every panel in current view; per-panel `isLoading` flips during; `lastError` clears on success.
+Refresh button at top: bumps `useObservabilityCache.epoch`; every panel hook re-fetches; per-panel `isLoading` flips during; `error` clears on success.
 
 ---
 
@@ -498,10 +619,10 @@ Refresh button at top: re-fetches every panel in current view; per-panel `isLoad
   "feature.observability.range.last_30d":               "Last 30 days",
   "feature.observability.range.custom":                 "Custom range",
   "feature.observability.range.refresh":                "Refresh",
-  "feature.observability.range.from_to":                "{from} – {to}",
+  "feature.observability.range.from_to":                "{{from}} – {{to}}",
 
   "feature.observability.cost.heading":                 "Cost",
-  "feature.observability.cost.total":                   "Total: ${amount}",
+  "feature.observability.cost.total":                   "Total: ${{amount}}",
   "feature.observability.cost.daily_trend":             "Daily cost trend",
   "feature.observability.cost.metric.tokens_in":        "Total input tokens",
   "feature.observability.cost.metric.tokens_out":       "Total output tokens",
@@ -515,7 +636,7 @@ Refresh button at top: re-fetches every panel in current view; per-panel `isLoad
   "feature.observability.cost.breakdown.dimension.skill_id":    "Skill",
   "feature.observability.cost.breakdown.dimension.model_id":    "Model",
   "feature.observability.cost.breakdown.dimension.kind":        "Kind",
-  "feature.observability.cost.breakdown.show_more":             "+ {count} more",
+  "feature.observability.cost.breakdown.show_more":             "+ {{count}} more",
   "feature.observability.cost.by_model.heading":                "Cost by model",
   "feature.observability.cost.empty":                           "No cost recorded in this range.",
 
@@ -547,16 +668,18 @@ Refresh button at top: re-fetches every panel in current view; per-panel `isLoad
   "feature.observability.errors.enrichment_partial":    "Showing first 100 failures by error class; older failures grouped as 'unknown'.",
 
   "feature.observability.export.csv":                   "Export CSV",
-  "feature.observability.export.too_many":              "Narrow your filters to enable export ({rows} rows; max {max}).",
+  "feature.observability.export.too_many":              "Narrow your filters to enable export ({{rows}} rows; max {{max}}).",
 
   "feature.observability.error.studio_unavailable":     "Studio is unavailable. Try again shortly.",
   "feature.observability.error.too_many_meetings":      "Too many meetings in this range; narrow your time filter.",
-  "feature.observability.error.fetch_failed":           "Could not load: {message}",
+  "feature.observability.error.fetch_failed":           "Could not load: {{message}}",
   "feature.observability.error.retry":                  "Retry",
 
   "feature.observability.mobile.charts_unavailable":    "Charts unavailable on small screens; data shown as table."
 }
 ```
+
+`zh.json` mirrors with translated values; same key set.
 
 ---
 
@@ -566,13 +689,14 @@ Refresh button at top: re-fetches every panel in current view; per-panel `isLoad
 
 | scenario | expected | test_id |
 |---|---|---|
-| /observability → /observability/cost | redirect | `t_ov_default_redirect` |
+| /observability → /observability/cost | loader throws redirect | `t_ov_default_redirect` |
 | /observability/activity | ActivityView rendered | `t_ov_tab_activity` |
 | /observability/errors | ErrorsView rendered | `t_ov_tab_errors` |
-| /observability/unknown | redirect to /cost | `t_ov_unknown_tab_redirect` |
-| tab click | router.push to clicked tab | `t_ov_tabs_nav` |
+| /observability/unknown | loader throws redirect to /cost | `t_ov_unknown_tab_redirect` |
+| tab click | navigate() to clicked tab; query preserved | `t_ov_tabs_nav` |
 | time range URL sync | preset="last_7d" → ?range=last_7d | `t_ov_range_url_sync` |
 | time range custom | ?range=custom&from=&to= roundtrips | `t_ov_range_custom_roundtrip` |
+| no permission | user lacks platform:view_observability | loader rejects per `02` §4.1 | `t_ov_perm_denied` |
 
 ### 10.2 CostView
 
@@ -587,6 +711,7 @@ Refresh button at top: re-fetches every panel in current view; per-panel `isLoad
 | export disabled too-many | rows > 5000 | button disabled with tooltip | `t_cv_export_too_many` |
 | partial failure | panel B fails, A + C succeed | panel B shows error; A + C render | `t_cv_partial_failure` |
 | total failure | every panel fetch fails | view-level error banner | `t_cv_total_failure` |
+| refresh epoch bumps | header refresh | every panel re-fetches once | `t_cv_refresh_epoch` |
 
 ### 10.3 ActivityView
 
@@ -598,6 +723,7 @@ Refresh button at top: re-fetches every panel in current view; per-panel `isLoad
 | forward-compat unknown status | meeting with status="archived" (hypothetical) | shown as "Other" segment with literal in tooltip | `t_av_status_forward_compat` |
 | too many meetings | mock returns > 5000 rows | view error "narrow time filter" | `t_av_too_many` |
 | paginated fetch | mock requires 3 pages | all 3 pages fetched + merged | `t_av_paginated` |
+| abort on filter change | filters change mid-fetch | prior request aborted | `t_av_abort_on_filter_change` |
 
 ### 10.4 ErrorsView
 
@@ -608,29 +734,33 @@ Refresh button at top: re-fetches every panel in current view; per-panel `isLoad
 | empty | no failures | "No failures 🎉" | `t_ev_empty` |
 | forward-compat unknown error_class | new studio error type | "other" slice with literal in tooltip + console log once | `t_ev_unknown_error_class` |
 | > 100 failures enrichment cap | 150 failed | first 100 enriched; remainder counted as "unknown" with footer note | `t_ev_enrichment_cap` |
-| failed meeting click → agora | click row | router.push to /platform/agora/<meeting_id> | `t_ev_click_agora` |
+| failed meeting click → agora | click row | navigate to /platform/agora/<meeting_id> | `t_ev_click_agora` |
 
-### 10.5 Composables
+### 10.5 Hooks
 
-| composable | scenario | expected | test_id |
+| hook | scenario | expected | test_id |
 |---|---|---|---|
 | useCostReportData | filters change | re-fetch | `t_cd_filters_change_refetch` |
 | useCostReportData | identical filters within 30s | cache hit (no studio call) | `t_cd_cache_hit` |
-| useCostReportData | manual refresh | bypass cache | `t_cd_refresh_bypass` |
+| useCostReportData | manual refresh | bypass cache + bump epoch | `t_cd_refresh_bypass` |
+| useCostReportData | unmount mid-fetch | AbortController aborts | `t_cd_unmount_abort` |
 | useMeetingActivity | aggregates by_day client-side | bucket count matches | `t_ma_aggregate_by_day` |
 | useMeetingActivity | enriches failed with get_meeting_status | concurrent up to 8 | `t_ma_enrich_concurrent` |
 | useMeetingActivity | hard cap > 5000 | aborts with too_many error | `t_ma_hard_cap` |
 | useTimeRange | preset change updates ISO | sinceISO/untilISO recompute | `t_tr_preset_change` |
 | useTimeRange | URL roundtrip | set + reload + read same state | `t_tr_url_roundtrip` |
+| useTimeRange | uses replace not push | preset toggle does not pollute history | `t_tr_replace_history` |
 
 ### 10.6 Charts
 
 | scenario | expected | test_id |
 |---|---|---|
 | LineChart empty data | empty_state placeholder | `t_lc_empty` |
-| BarChart resize | container width change → ResizeObserver fires | redraw debounced | `t_bc_resize_debounce` |
+| BarChart resize | container width change → Chart.js redraws | wrapper does not throw | `t_bc_resize` |
 | DonutChart locale-formatted tooltip | locale=zh, value=1234.56 | tooltip shows "1,234.56 USD" with zh locale formatting | `t_dc_locale_format` |
-| Theme-aware palette | theme=dark | dark variant colors used | `t_charts_theme` |
+| Theme-aware palette | theme switches to dark | wrapper re-renders with dark variant colors | `t_charts_theme` |
+| ensureChartsRegistered idempotent | second call | no duplicate registration | `t_charts_register_idempotent` |
+| reduced motion | matchMedia "prefers-reduced-motion" | animation disabled | `t_charts_reduced_motion` |
 
 ---
 
@@ -640,9 +770,13 @@ Refresh button at top: re-fetches every panel in current view; per-panel `isLoad
 Studio's cost ledger is the source of truth (per `01` §7.10); product fetches rows + groups client-side. Adding apps/api summarization would create a second source of truth for cost data — wrong, and operationally invites drift. v0.2 may add server-side aggregation parameters to studio if scale demands it.
 *Considered and rejected.* **apps/api summarizes** — second source of truth.
 
-**Why Chart.js (and not D3 which agora already uses).**
-Plain dashboards (line / bar / doughnut) need legends, tooltips, axes — Chart.js batteries-included. D3 would require glue per chart type. Agora's DAG is bespoke (force layout); reusing D3 there is justified. Observability charts are commodity; lighter wrapper is the right call.
-*Considered and rejected.* **D3 for both** — extra glue work; same outcome. **Server-rendered charts** — loses interactivity.
+**Why Chart.js + react-chartjs-2 (and not D3 which agora already uses).**
+Plain dashboards (line / bar / doughnut) need legends, tooltips, axes — Chart.js batteries-included; `react-chartjs-2` handles the React lifecycle binding so no `useEffect` glue per chart. D3 would require glue per chart type and per React hook. Agora's DAG is bespoke (force layout); reusing D3 there is justified. Observability charts are commodity; lighter wrapper is the right call.
+*Considered and rejected.* **D3 for both** — extra glue work; same outcome. **Server-rendered charts** — loses interactivity. **Recharts** — heavier API surface for the same use case; tooltip customization more awkward.
+
+**Why a Zustand cache (not React Query / SWR).**
+Cache requirements are narrow: keyed by serialized filters, 30 s stale, plus a shared "epoch" that all panels watch so `refresh()` re-fetches everything atomically. A 40-line Zustand store satisfies that without pulling in a 12 KB query library and its conventions. The shell already standardizes Zustand for keyed singletons (per `01b` §3); using it here keeps the registry pattern consistent across packages.
+*Considered and rejected.* **React Query** — adds a query-layer abstraction we don't need; the epoch-bump + invalidate pattern is simpler in plain Zustand. **No cache** — tab-switching re-fetches feel laggy.
 
 **Why no caching beyond 30 s session-level.**
 Cost data changes slowly but the user's mental model is "I clicked refresh; now I see fresh data." Long-lived cache invalidates that. 30 s makes tab-switching fast without going stale.
@@ -676,6 +810,10 @@ Drill-down would require joining chart slices to specific meetings (e.g., "click
 Dashboards reflect aggregate state that changes slowly; refresh button is enough. Live SSE would require server push for cost changes, which studio doesn't expose. Polling at 30 s is implicit through the cache stale time.
 *Considered and rejected.* **Auto-refresh every 30 s** — surprising battery drain on idle tabs. **SSE** — studio doesn't push cost events.
 
+**Why Panel B's dimension is React-state (not URL-state).**
+URL state pays off when the user wants to share / bookmark / open-in-new-tab a specific view configuration. For a single panel-internal knob with 7 values, URL pollution outweighs the share value. Time range *is* URL-synced because it scopes every panel.
+*Considered and rejected.* **Persist dimension in URL** — busy URL for marginal benefit.
+
 ---
 
 ## §12 Downstream impact
@@ -683,12 +821,12 @@ Dashboards reflect aggregate state that changes slowly; refresh button is enough
 | Spec | Adjustment |
 |---|---|
 | `01-studio-client-spec.md` | The §6.3 N+1 enrichment workaround is documented as a v0.2 request: "Add `error_class` to `MeetingSummary` so observability avoids per-failed-meeting `get_meeting_status` calls." Tracked in `docs/migration-log.md` (operational; will be added by user). |
-| `02-platform-shell-spec.md` | `useStudio()` consumed; no change. |
+| `02-platform-shell-spec.md` | `useStudio()`, `useTheme()` consumed; no change. The shell exposes `makePermissionsLoader` (per spec 02 §10) used by `routes.ts`. |
 | `03-auth-service-spec.md` | `platform:view_observability` consumed; declared upstream. |
 | `05-feature-agora-spec.md` | The "open meeting" link from ErrorsView's failed-meetings table navigates to `/platform/agora/<meeting_id>`. Already supported. |
 | `13-vertical-template-spec.md` | No vertical extension surface; observability is platform-only. |
-| `15-apps-api-spec.md` | No new endpoints. Charts library (Chart.js) declared as a frontend dep in `apps/frontend/package.json` (per spec 16). |
-| `16-apps-frontend-spec.md` | Add `chart.js` to `apps/frontend/package.json`. Bundle ~80 KB minified-gzipped — under typical performance budget for an internal admin tool. |
+| `15-apps-api-spec.md` | No new endpoints. Charts library (Chart.js + react-chartjs-2) declared as a frontend dep in `apps/frontend/package.json` (per spec 16). |
+| `16-apps-frontend-spec.md` | Add `chart.js` (~80 KB min+gz) and `react-chartjs-2` (~5 KB) to `apps/frontend/package.json`. Bundle hit acceptable for an internal admin tool. |
 | `17-substitution-tests-spec.md` | Observability's `useCostReportData` calls studio's `get_cost_report`; covered by existing `[SUB] t_gcr_*` tests in `01` §7.10. |
 
 ---
@@ -696,20 +834,20 @@ Dashboards reflect aggregate state that changes slowly; refresh button is enough
 ## §13 Pre-merge checklist
 
 - [ ] Mission + Scope present; out-of-scope listed (per-vertical breakdowns, per-event-type analytics, email digest, anomaly detection, custom dashboards, real-time, multi-tenant filters, chart drill-down, alerting, ROI calcs, comparison mode, mobile chart layouts)
-- [ ] Module layout (§1) frontend-only; no backend; Chart.js dependency noted
+- [ ] Module layout (§1) frontend-only; no backend; chart.js + react-chartjs-2 dependency noted
 - [ ] Permissions (§1.1) `platform:view_observability` + list_projects + list_meetings (already declared upstream)
-- [ ] 2 routes (§1.2) with tab validation in beforeEnter
+- [ ] 2 routes (§1.2) with tab validation in loader (throws `redirect()`); permission gate via `makePermissionsLoader`
 - [ ] All 6 visual states (§2.2) covered including partial / total failure variants
-- [ ] All 3 view components (§4) with panels enumerated + props/emits + data sources
+- [ ] All 3 view components (§4) with panels enumerated + props + data sources
 - [ ] CostView panel C (Cost by model) explicitly motivated as default-surfaced metric (§4.1 + §11)
-- [ ] All 3 chart components (§5) with TS contract + Chart.js library rationale (§5.1)
-- [ ] All 3 composables (§6) with signatures + behavior + cache strategy + hard cap
+- [ ] All 3 chart components (§5) with TS contract + library rationale (§5.1) + chart.js registration discipline (§5.4)
+- [ ] All 3 hooks (§6) with signatures + behavior + cache strategy + hard cap; AbortController cleanup documented
 - [ ] N+1 enrichment workaround (§6.3) documented + capped + v0.2 request raised
 - [ ] CSV export (§7) client-side + 5000-row cap rationale
 - [ ] Per-view error / empty / loading matrix (§8) covers each view × each state
-- [ ] i18n keys (§9) for every user-visible string with en values
-- [ ] Test matrix (§10): routing (7), CostView (9), ActivityView (6), ErrorsView (6), composables (8), charts (4); ≥ 35 rows
-- [ ] Why-this / why-not (§11) for ≥ 8 load-bearing decisions
+- [ ] i18n keys (§9) for every user-visible string with en values; uses `{{var}}` interpolation
+- [ ] Test matrix (§10): routing (8), CostView (10), ActivityView (7), ErrorsView (6), hooks (10), charts (6); ≥ 47 rows
+- [ ] Why-this / why-not (§11) for ≥ 12 load-bearing decisions
 - [ ] Downstream impact (§12) lists every spec affected; v0.2 studio request flagged
 - [ ] No business / domain / product / agent-role string literals (uses neutral examples)
 - [ ] No `from entelecheia` / `import entelecheia`
