@@ -1,9 +1,10 @@
 # 14 — `verticals/investment` v0.1 spec
 
-> **Status**: v0.1 contract for the first concrete vertical pack — investment.
+> **Status**: v0.1 contract for the first concrete vertical pack — investment (React).
 > **Lives at**: `packages/verticals/investment/`.
 > **Consumes**: `13-vertical-template-spec.md` (the canonical structure this spec instantiates), `02-platform-shell-spec.md` §3 (`VerticalManifest`), `06-feature-reports-spec.md` §6.3 (`report_templates`), `09-feature-uploads-spec.md` §1.4 (custom upload handlers).
 > **Forwards to**: `15-apps-api-spec.md` §boot (entry-point discovery + fixture overlay merge).
+> **Supersedes**: the Vue version of this spec; React migration per session decision 2026-05-03.
 > **Domain vocabulary note**: this spec is INSIDE a `packages/verticals/<id>/` directory equivalent in spec form; per `entelecheia-product-philosophy` skill + `scripts/check-purity.sh`, the forbidden-vocabulary rule applies to `packages/platform-*` and `apps/*` only. This spec legitimately uses "investment" / "financial-report" / "due-diligence" / "yahoo-finance" / "akshare" — they are the vertical's domain.
 
 ---
@@ -22,9 +23,9 @@ This file defines the investment vertical — the first concrete vertical pack, 
 - Module layout under `packages/verticals/investment/`, derived from `13` `_template/` via the rename script.
 - Backend `manifest.py` instance: 4 routers (yahoo data + akshare data + financial upload + business-plan upload), 5 declared permissions, fixture overlay = "investment", 2 report templates.
 - Frontend `manifest.ts` instance: 2 tabs, 1 widget, 2 upload handlers, 2 data feeds, project_id_in allowlist of 5 projects, i18n bundles, accent_color, default_route.
-- 2 tab Vue components: `<MarketWatchTab>`, `<PortfolioTab>`.
-- 1 widget Vue component: `<MarketSummaryWidget>`.
-- 2 upload handler Vue components: `<FinancialReportHandler>`, `<BusinessPlanHandler>`.
+- 2 tab React components: `<MarketWatchTab>`, `<PortfolioTab>`.
+- 1 widget React component: `<MarketSummaryWidget>`.
+- 2 upload handler React components: `<FinancialReportHandler>`, `<BusinessPlanHandler>`.
 - 2 backend data-feed routers (yahoo-finance proxy + akshare proxy) with caching + rate limiting.
 - 2 backend upload handler endpoints (vertical-specific validation that doesn't fit the generic `/api/uploads`).
 - 2 report templates with section composition.
@@ -44,8 +45,8 @@ This file defines the investment vertical — the first concrete vertical pack, 
 - Compliance / KYC workflows.
 
 **Out of scope for v0.1.**
-- Real-time market data via WebSocket. v0.1 polls every 30s.
-- Server-side persistence of user's watchlist + portfolio. v0.1 stores in vertical's Pinia store (in-memory per session). v0.2 may extend `UserPreferences.extras` (per `04` §scope hint) for cross-session persistence.
+- Real-time market data via WebSocket. v0.1 polls every 30 s.
+- Server-side persistence of user's watchlist + portfolio. v0.1 stores in vertical's Zustand store (in-memory per session). v0.2 may extend `UserPreferences.extras` (per `04` §scope hint) for cross-session persistence.
 - Advanced charting (TradingView-style candles + indicators). v0.1 shows price + change only.
 - Sector / industry analytics views.
 - Per-user data feed credentials. v0.1 uses platform-wide API keys via env vars (`YAHOO_API_KEY` if needed; akshare is keyless).
@@ -75,29 +76,36 @@ packages/verticals/investment/
 │   │   ├── data_sources/
 │   │   │   ├── yahoo_client.py                   # thin httpx wrapper + 30s cache
 │   │   │   └── akshare_client.py                 # thin akshare wrapper + 60s cache
-│   │   ├── report_templates/
-│   │   │   ├── investment_summary.py
-│   │   │   └── due_diligence.py
-│   │   └── tests/
+│   │   └── report_templates/
+│   │       ├── investment_summary.py
+│   │       └── due_diligence.py
 │   └── __init__.py
+├── tests_api/
+│   ├── test_data_yahoo.py
+│   ├── test_data_akshare.py
+│   ├── test_uploads_financial.py
+│   └── test_uploads_business_plan.py
 ├── frontend/
 │   ├── src/
 │   │   ├── manifest.ts
 │   │   ├── components/
 │   │   │   ├── tabs/
-│   │   │   │   ├── MarketWatchTab.vue
-│   │   │   │   └── PortfolioTab.vue
+│   │   │   │   ├── MarketWatchTab.tsx
+│   │   │   │   └── PortfolioTab.tsx
 │   │   │   ├── widgets/
-│   │   │   │   └── MarketSummaryWidget.vue
+│   │   │   │   └── MarketSummaryWidget.tsx
 │   │   │   ├── handlers/
-│   │   │   │   ├── FinancialReportHandler.vue
-│   │   │   │   └── BusinessPlanHandler.vue
+│   │   │   │   ├── FinancialReportHandler.tsx
+│   │   │   │   └── BusinessPlanHandler.tsx
 │   │   │   └── shared/
-│   │   │       ├── QuoteRow.vue                  # used by both market-watch + dashboard widget
-│   │   │       └── PnLBadge.vue                  # green/red P&L pill
+│   │   │       ├── QuoteRow.tsx                  # used by both market-watch + dashboard widget
+│   │   │       └── PnLBadge.tsx                  # green/red P&L pill
 │   │   ├── stores/
-│   │   │   ├── marketWatchStore.ts               # Pinia: watchlist (in-memory v0.1)
-│   │   │   └── portfolioStore.ts                 # Pinia: holdings (in-memory v0.1)
+│   │   │   ├── marketWatchStore.ts               # Zustand: watchlist (in-memory v0.1)
+│   │   │   └── portfolioStore.ts                 # Zustand: holdings (in-memory v0.1)
+│   │   ├── hooks/
+│   │   │   ├── useYahooQuotes.ts                 # polls /yahoo/quotes; AbortController + 30s interval
+│   │   │   └── useAkshareQuotes.ts               # polls /akshare/quotes; 30s interval
 │   │   └── i18n/
 │   │       ├── zh.json
 │   │       └── en.json
@@ -111,7 +119,8 @@ packages/verticals/investment/
 Cross-cutting deltas vs `_template`:
 - `data_sources/` subdir for the upstream-API clients (yahoo + akshare have non-trivial wrappers worth isolating from routers)
 - `shared/` frontend subdir for components reused across tabs + widget
-- 2 stores (separate concerns — watchlist vs portfolio)
+- 2 Zustand stores (separate concerns — watchlist vs portfolio)
+- `hooks/` subdir for fetch hooks (polling + abort discipline lives here, not in components)
 
 ---
 
@@ -121,7 +130,6 @@ Cross-cutting deltas vs `_template`:
 # packages/verticals/investment/src/entelecheia_vertical_investment/manifest.py
 
 from entelecheia_platform_shell.types import VerticalManifest
-from entelecheia_studio_client.dto.reports import ReportTemplate
 
 from .api.routers.data_yahoo import yahoo_router
 from .api.routers.data_akshare import akshare_router
@@ -184,12 +192,13 @@ investment = "entelecheia_vertical_investment.manifest:vertical_manifest"
 // packages/verticals/investment/frontend/src/manifest.ts
 import type { VerticalManifest } from "@entelecheia/platform-shell";
 import type { ProjectId } from "@entelecheia/studio-client";
+import { TrendingUp } from "lucide-react";
 
-import MarketWatchTab from "./components/tabs/MarketWatchTab.vue";
-import PortfolioTab from "./components/tabs/PortfolioTab.vue";
-import MarketSummaryWidget from "./components/widgets/MarketSummaryWidget.vue";
-import FinancialReportHandler from "./components/handlers/FinancialReportHandler.vue";
-import BusinessPlanHandler from "./components/handlers/BusinessPlanHandler.vue";
+import MarketWatchTab from "./components/tabs/MarketWatchTab";
+import PortfolioTab from "./components/tabs/PortfolioTab";
+import MarketSummaryWidget from "./components/widgets/MarketSummaryWidget";
+import FinancialReportHandler from "./components/handlers/FinancialReportHandler";
+import BusinessPlanHandler from "./components/handlers/BusinessPlanHandler";
 import zh from "./i18n/zh.json";
 import en from "./i18n/en.json";
 
@@ -197,7 +206,7 @@ const manifest: VerticalManifest = {
   vertical_id: "investment",
   display_name: "Investment Research",
   description: "Equity research, due diligence, portfolio analytics for the investment use case.",
-  icon: "TrendingUp",
+  icon: TrendingUp,                                  // React.ComponentType from lucide-react
   accent_color: "#0EA5E9",                           // sky-500; finance-flavored
 
   tabs: [
@@ -205,7 +214,7 @@ const manifest: VerticalManifest = {
       id: "market-watch",
       label_key: "vertical.investment.tab.market_watch",
       route_path: "/market-watch",                    // /investment/market-watch
-      component: MarketWatchTab,
+      component: MarketWatchTab,                      // React.ComponentType
       required_permission: "investment:market_watch",
       position: 100,
     },
@@ -256,12 +265,12 @@ const manifest: VerticalManifest = {
     {
       id: "yahoo-finance",
       api_path: "/api/verticals/investment/data/yahoo",
-      description: "Yahoo Finance quote proxy (US + global markets). 30s cache.",
+      description: "Yahoo Finance quote proxy (US + global markets). 30 s cache.",
     },
     {
       id: "akshare",
       api_path: "/api/verticals/investment/data/akshare",
-      description: "A-share quote proxy via akshare (Shanghai + Shenzhen). 60s cache.",
+      description: "A-share quote proxy via akshare (Shanghai + Shenzhen). 60 s cache.",
     },
   ],
 
@@ -325,45 +334,105 @@ Per the rename + boot dance (per `13` §9), apps/api registers all 5 with auth-s
 
 ### 5.1 `<MarketWatchTab>` (行情)
 
-```typescript
-// packages/verticals/investment/frontend/src/components/tabs/MarketWatchTab.vue (script)
-import { ref, computed, onMounted, onUnmounted } from "vue";
-import { useI18n, useToast } from "@entelecheia/platform-shell";
+```tsx
+// packages/verticals/investment/frontend/src/components/tabs/MarketWatchTab.tsx
+import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useToast } from "@entelecheia/platform-shell";
 import { useMarketWatchStore } from "../../stores/marketWatchStore";
+import { useYahooQuotes } from "../../hooks/useYahooQuotes";
+import { useAkshareQuotes } from "../../hooks/useAkshareQuotes";
+import { QuoteRow } from "../shared/QuoteRow";
 
-interface QuoteRow {
-  symbol:        string;
-  source:        "yahoo" | "akshare";
-  price:         number;
-  change:        number;
-  change_pct:    number;
-  volume:        number;
-  ts:            string;        // ISO; last update
-  error:         string | null;  // per-row fetch error
+export interface QuoteRowData {
+  symbol:     string;
+  source:     "yahoo" | "akshare";
+  price:      number;
+  change:     number;
+  change_pct: number;
+  volume:     number;
+  ts:         string;        // ISO; last update
+  error:      string | null; // per-row fetch error
 }
 
-// Component renders:
-//   - SymbolPicker (search + add)
-//   - watchlist <table> with QuoteRow[] (sortable by symbol / change_pct / volume)
-//   - "Refresh" button + auto-refresh toggle (30s default)
-//   - Per-row "Remove from watchlist" action
-//   - Per-row "Add to portfolio" → prefills PortfolioTab
-//   - Empty state when watchlist is empty (CTA: "Add a symbol")
+export default function MarketWatchTab() {
+  const { t } = useTranslation();
+  const { push: pushToast } = useToast();
+  const watchlist = useMarketWatchStore(s => s.watchlist);
+  const addSymbol = useMarketWatchStore(s => s.add);
+  const removeSymbol = useMarketWatchStore(s => s.remove);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  const yahooSymbols = useMemo(
+    () => watchlist.filter(w => w.source === "yahoo").map(w => w.symbol),
+    [watchlist],
+  );
+  const akshareSymbols = useMemo(
+    () => watchlist.filter(w => w.source === "akshare").map(w => w.symbol),
+    [watchlist],
+  );
+
+  const yahoo   = useYahooQuotes(yahooSymbols,   { intervalMs: autoRefresh ? 30_000 : 0 });
+  const akshare = useAkshareQuotes(akshareSymbols, { intervalMs: autoRefresh ? 30_000 : 0 });
+
+  const rows = useMemo(() => mergeAndSort([...yahoo.quotes, ...akshare.quotes]), [yahoo.quotes, akshare.quotes]);
+
+  // Component renders:
+  //   - SymbolPicker (search + add)
+  //   - watchlist <table> with QuoteRow[] (sortable by symbol / change_pct / volume)
+  //   - Auto-refresh toggle (30 s default) + Refresh button (calls yahoo.refresh + akshare.refresh)
+  //   - Per-row "Remove from watchlist" action
+  //   - Per-row "Add to portfolio" → prefills PortfolioTab via portfolioStore.openAddDialog(...)
+  //   - Empty state when watchlist is empty (CTA: "Add a symbol")
+  //   - Per-source error banner ("Yahoo feed unavailable") when one side errored
+  return (/* ... */);
+}
 ```
 
-**State.** `useMarketWatchStore()` (Pinia, in-memory v0.1) holds watchlist `Set<{symbol, source}>`. Watchlist persists for the SESSION; reload starts empty (v0.2 may persist via `UserPreferences.extras`).
+**State.** `useMarketWatchStore()` (Zustand, in-memory v0.1) holds watchlist `{symbol, source}[]` plus `add/remove/clear` actions. Watchlist persists for the SESSION; reload starts empty (v0.2 may persist via `UserPreferences.extras`).
 
-**Data fetch.** On mount + every 30s + on Refresh click:
+**Data fetch (`useYahooQuotes`).** Standalone hook so the polling + abort discipline lives outside the component:
+
 ```typescript
-const symbols = watchlist.value
-  .filter(w => w.source === "yahoo")
-  .map(w => w.symbol)
-  .join(",");
-const yahooQuotes = await fetch(`/api/verticals/investment/data/yahoo/quotes?symbols=${symbols}`).then(r => r.json());
-// similarly for akshare
+// hooks/useYahooQuotes.ts
+import { useEffect, useRef, useState } from "react";
+
+export function useYahooQuotes(symbols: string[], opts: { intervalMs: number }) {
+  const [quotes, setQuotes] = useState<QuoteRowData[]>([]);
+  const [error, setError]   = useState<string | null>(null);
+  const ctrlRef = useRef<AbortController | null>(null);
+
+  async function fetchOnce() {
+    if (symbols.length === 0) { setQuotes([]); return; }
+    ctrlRef.current?.abort();
+    const ctrl = new AbortController();
+    ctrlRef.current = ctrl;
+    try {
+      const res = await fetch(`/api/verticals/investment/data/yahoo/quotes?symbols=${symbols.join(",")}`, { signal: ctrl.signal });
+      const body = await res.json();
+      if (body.error) { setError(body.error); return; }
+      setQuotes(body.quotes.map((q: any) => ({ ...q, source: "yahoo", error: null })));
+      setError(null);
+    } catch (e: any) {
+      if (e.name === "AbortError") return;
+      setError("upstream_unavailable");
+    }
+  }
+
+  useEffect(() => {
+    void fetchOnce();
+    if (opts.intervalMs <= 0) return;
+    const id = setInterval(fetchOnce, opts.intervalMs);
+    return () => { clearInterval(id); ctrlRef.current?.abort(); };
+  }, [symbols.join(","), opts.intervalMs]);
+
+  return { quotes, error, refresh: fetchOnce };
+}
 ```
 
-**Errors per source.** If yahoo returns 502 (upstream error), yahoo rows show `error` field; akshare rows still render. Inverse if akshare fails.
+`useAkshareQuotes` mirrors this shape against the akshare endpoint.
+
+**Errors per source.** If yahoo returns 502 (upstream error), `yahoo.error === "upstream_unavailable"` and yahoo rows render with the cached values + a banner; akshare rows still render. Inverse if akshare fails.
 
 **Test rows.**
 
@@ -371,45 +440,57 @@ const yahooQuotes = await fetch(`/api/verticals/investment/data/yahoo/quotes?sym
 |---|---|---|
 | empty watchlist | empty state visible | `t_mw_empty` |
 | add symbol via picker | row appears with quote | `t_mw_add_symbol` |
-| auto-refresh ticks | every 30s row updates | `t_mw_auto_refresh` |
-| yahoo 502 | yahoo rows show error; akshare rows OK | `t_mw_yahoo_partial_fail` |
+| auto-refresh ticks | every 30 s row updates | `t_mw_auto_refresh` |
+| toggle auto-refresh off | interval cleared; manual refresh still works | `t_mw_auto_refresh_off` |
+| yahoo 502 | yahoo banner shown; akshare rows OK | `t_mw_yahoo_partial_fail` |
 | sort by change_pct | rows reorder | `t_mw_sort` |
-| add-to-portfolio | clicking emits to PortfolioStore | `t_mw_to_portfolio` |
+| add-to-portfolio | clicking opens portfolio Add dialog prefilled | `t_mw_to_portfolio` |
 | remove from watchlist | row removed; persists in store | `t_mw_remove` |
+| unmount aborts in-flight fetches | switching tabs mid-poll | no console "set state on unmounted" warning | `t_mw_unmount_abort` |
 
 ### 5.2 `<PortfolioTab>` (持仓)
 
-```typescript
-// PortfolioTab.vue (script)
-import { useI18n, useToast } from "@entelecheia/platform-shell";
+```tsx
+// PortfolioTab.tsx
+import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { usePortfolioStore } from "../../stores/portfolioStore";
+import { useYahooQuotes } from "../../hooks/useYahooQuotes";
+import { useAkshareQuotes } from "../../hooks/useAkshareQuotes";
 
-interface Holding {
-  symbol:       string;
-  source:       "yahoo" | "akshare";
-  shares:       number;
-  avg_cost:     number;            // per share
-  added_at:     string;
+export interface Holding {
+  symbol:   string;
+  source:   "yahoo" | "akshare";
+  shares:   number;
+  avg_cost: number;            // per share
+  added_at: string;
 }
 
-interface ComputedHolding extends Holding {
-  current_price: number | null;     // null when quote unavailable
+export interface ComputedHolding extends Holding {
+  current_price: number | null;
   market_value:  number | null;
   pnl:           number | null;
   pnl_pct:       number | null;
   error:         string | null;
 }
+
+export default function PortfolioTab() {
+  const { t } = useTranslation();
+  const holdings = usePortfolioStore(s => s.holdings);
+  // ... (compute via hooks; render table; modal for Add; confirm for Remove)
+  return (/* ... */);
+}
 ```
 
 **Renders.**
-- Header: total portfolio value + day's P&L pill (green/red).
+- Header: total portfolio value + day's P&L pill (green/red, via `<PnLBadge>`).
 - Holdings table: symbol / shares / avg cost / current price / market value / P&L / P&L %.
-- "Add holding" button → modal with symbol picker + shares + avg-cost inputs.
-- "Remove" per row (with confirm).
+- "Add holding" button → modal (native `<dialog>` + focus-trap-react per 05/08/09/10/11 standard pattern) with symbol picker + shares + avg-cost inputs.
+- "Remove" per row (with confirm dialog, same modal primitive).
 - "Import from CSV" — paste CSV with `symbol,shares,avg_cost` per line; client-side parse; appends to store.
 - Empty state with "Add your first holding" CTA.
 
-**Data.** `usePortfolioStore()` holds holdings in memory (per session). For each holding, fetch quotes from data feeds (same paths as MarketWatchTab); compute P&L client-side.
+**Data.** `usePortfolioStore()` holds holdings in memory (per session). Quotes are fetched via the same `useYahooQuotes` / `useAkshareQuotes` hooks as MarketWatchTab; computed P&L is derived in a `useMemo`.
 
 **v0.2 hooks documented.** `UserPreferences.extras.investment.portfolio` could persist holdings; `UserPreferences.extras.investment.broker_credentials` could enable broker integration.
 
@@ -429,17 +510,31 @@ interface ComputedHolding extends Holding {
 
 ## §6 Widget — `<MarketSummaryWidget>`
 
-```typescript
-// MarketSummaryWidget.vue (script)
-// Props: none (renders top 3 indices: SPX, NDX, SHCOMP)
-// Behavior: fetches summary from data feeds every 60s; displays compact
-//           QuoteRow per index; clicking opens MarketWatchTab.
+```tsx
+// MarketSummaryWidget.tsx
+import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
+import { useYahooQuotes } from "../../hooks/useYahooQuotes";
+import { useAkshareQuotes } from "../../hooks/useAkshareQuotes";
 
 const indices = [
-  { symbol: "^GSPC", source: "yahoo",   label: "S&P 500" },
-  { symbol: "^IXIC", source: "yahoo",   label: "NASDAQ" },
+  { symbol: "^GSPC",    source: "yahoo",   label: "S&P 500" },
+  { symbol: "^IXIC",    source: "yahoo",   label: "NASDAQ" },
   { symbol: "000001.SS", source: "akshare", label: "上证指数" },
-];
+] as const;
+
+export default function MarketSummaryWidget() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+
+  const yahoo   = useYahooQuotes(["^GSPC", "^IXIC"], { intervalMs: 60_000 });
+  const akshare = useAkshareQuotes(["000001.SS"],     { intervalMs: 60_000 });
+
+  // Renders 3 compact QuoteRows (or "Data unavailable" if both feeds error).
+  // Clicking an index navigates to /investment/market-watch with the symbol prefilled
+  // via search params: navigate(`/investment/market-watch?prefill=${sym}&source=${src}`).
+  return (/* ... */);
+}
 ```
 
 **Test rows.**
@@ -447,8 +542,8 @@ const indices = [
 | scenario | expected | test_id |
 |---|---|---|
 | renders 3 indices | 3 QuoteRows visible | `t_ms_render` |
-| auto-refresh 60s | values update | `t_ms_refresh` |
-| click index | router.push to /investment/market-watch with that symbol prefilled | `t_ms_click` |
+| auto-refresh 60 s | values update | `t_ms_refresh` |
+| click index | navigate to /investment/market-watch?prefill=…&source=… | `t_ms_click` |
 | degraded if all feeds down | placeholder "Data unavailable" | `t_ms_degraded` |
 
 ---
@@ -459,20 +554,36 @@ const indices = [
 
 Renders after a user uploads a `.pdf` or `.xlsx` matching the `investment:financial-report` kind.
 
-```typescript
-// FinancialReportHandler.vue (script)
+```tsx
+// FinancialReportHandler.tsx
+import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import type { Upload } from "@entelecheia/uploads";
 
-const props = defineProps<{ upload: Upload }>();
-const emit = defineEmits<{
-  (e: "confirm", upload_id: string, normalized: { company?: string; period?: string }): void;
-  (e: "cancel"): void;
-}>();
+export interface FinancialReportHandlerProps {
+  upload: Upload;
+  onConfirm: (upload_id: string, normalized: { company?: string; period?: string }) => void;
+  onCancel: () => void;
+}
 
-// Heuristic extraction: filename matching e.g. "AAPL-10K-2024Q4.pdf"
-//   → company="AAPL", period="2024Q4"
-// User can edit the extracted values before confirming.
-// Server-side parsing happens at the upload endpoint (§7.2 backend).
+export default function FinancialReportHandler({ upload, onConfirm, onCancel }: FinancialReportHandlerProps) {
+  const { t } = useTranslation();
+  const initial = useMemo(() => extractFromFilename(upload.display_name), [upload.display_name]);
+  const [company, setCompany] = useState(initial.company ?? "");
+  const [period,  setPeriod]  = useState(initial.period  ?? "");
+
+  // Heuristic extraction: filename matching e.g. "AAPL-10K-2024Q4.pdf"
+  //   → company="AAPL", period="2024Q4"
+  // User can edit the extracted values before confirming.
+  // Server-side parsing happens at the upload endpoint (§7.2 backend).
+  return (/* ... */);
+}
+
+function extractFromFilename(name: string): { company?: string; period?: string } {
+  const m = /^([A-Z0-9.]+)[-_]?(10[KQ])?[-_]?(\d{4}(?:Q[1-4])?)/i.exec(name);
+  if (!m) return {};
+  return { company: m[1], period: m[3] };
+}
 ```
 
 **Test rows.**
@@ -481,14 +592,15 @@ const emit = defineEmits<{
 |---|---|---|
 | filename heuristic | "AAPL-10K-2024Q4.pdf" → fields prefilled | `t_fh_filename_extract` |
 | user edits | manual override works | `t_fh_manual_edit` |
-| confirm | emit confirm with normalized | `t_fh_confirm` |
+| confirm | calls onConfirm with normalized | `t_fh_confirm` |
 | xlsx accepted | shows parsed sheet preview (first 10 rows) | `t_fh_xlsx_preview` |
+| cancel | calls onCancel | `t_fh_cancel` |
 
 ### 7.2 Backend: `uploads_financial.py`
 
 ```python
 # packages/verticals/investment/src/entelecheia_vertical_investment/api/routers/uploads_financial.py
-from fastapi import APIRouter, Depends, UploadFile, HTTPException, status
+from fastapi import APIRouter, Depends, UploadFile
 from entelecheia_auth.deps import require_auth, CurrentAuthContext
 from entelecheia_platform_shell.permissions import require_permission
 
@@ -547,7 +659,7 @@ async def get_yahoo_quotes(
     ctx: CurrentAuthContext = Depends(require_auth),
     _perm = Depends(require_permission("investment:market_watch")),
 ) -> dict:
-    """Quote proxy. 30s in-memory cache. Returns:
+    """Quote proxy. 30 s in-memory cache. Returns:
         { quotes: [{ symbol, price, change, change_pct, volume, currency, ts }] }
     """
     sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
@@ -559,7 +671,7 @@ async def get_yahoo_quotes(
     return {"quotes": quotes}
 ```
 
-**`yahoo_client.py`** wraps Yahoo's public quote API via httpx. 30s cache (in-memory dict keyed by symbol; expires per entry). Rate limit: 100 requests/min per process (Yahoo's documented limit). On rate-limit hit: return cached values + `stale: true` flag. On upstream 5xx: return cached values + `stale: true` + `error: "upstream_unavailable"`.
+**`yahoo_client.py`** wraps Yahoo's public quote API via httpx. 30 s cache (in-memory dict keyed by symbol; expires per entry). Rate limit: 100 requests/min per process (Yahoo's documented limit). On rate-limit hit: return cached values + `stale: true` flag. On upstream 5xx: return cached values + `stale: true` + `error: "upstream_unavailable"`.
 
 **Why proxy (not direct browser fetch).** API key security (when keyed); CORS bypass; centralized caching; consistent error envelope.
 
@@ -581,24 +693,24 @@ async def get_akshare_quotes(
     ctx: CurrentAuthContext = Depends(require_auth),
     _perm = Depends(require_permission("investment:market_watch")),
 ) -> dict:
-    """A-share quote proxy. 60s cache. Symbol format: 6-digit code (no .SH/.SZ
+    """A-share quote proxy. 60 s cache. Symbol format: 6-digit code (no .SH/.SZ
     suffix; akshare disambiguates). Returns same shape as yahoo with currency=CNY."""
     # ... (cap, fetch, return)
     return {"quotes": []}
 ```
 
-**Why akshare.** Pure-Python A-share data library; no API key; covers Shanghai + Shenzhen + indices. Slower than yahoo (~500ms-2s per call); cache is more important.
+**Why akshare.** Pure-Python A-share data library; no API key; covers Shanghai + Shenzhen + indices. Slower than yahoo (~500 ms-2 s per call); cache is more important.
 
 **Test matrix (data feeds).**
 
 | scenario | expected | test_id |
 |---|---|---|
 | yahoo happy | list of QuoteRow returned | `t_dy_happy` |
-| yahoo cache hit | second call within 30s returns cached without upstream | `t_dy_cache` |
+| yahoo cache hit | second call within 30 s returns cached without upstream | `t_dy_cache` |
 | yahoo upstream 5xx | returns cached + stale=true + error | `t_dy_upstream_fail` |
-| yahoo > 50 symbols | 400 with too_many_symbols | `t_dy_too_many` |
+| yahoo > 50 symbols | 200 with `error: "too_many_symbols"` | `t_dy_too_many` |
 | akshare happy | A-share quotes returned with currency=CNY | `t_da_happy` |
-| akshare cache hit | second call within 60s cached | `t_da_cache` |
+| akshare cache hit | second call within 60 s cached | `t_da_cache` |
 | permission denied | user without investment:market_watch | 403 | `t_dy_perm` |
 
 ---
@@ -754,10 +866,10 @@ Both templates registered with apps/api at boot (per `06` §6.3); appear in `<Te
     - {at_offset_ms: 12100, event_type: meeting_finalized, data: {outcome_ref: "tmpl_investment_equity_research"}}
 
 - template_id: tmpl_investment_due_diligence
-  # ... (longer script: ~60s with more claims + challenges across 50 turns)
+  # ... (longer script: ~60 s with more claims + challenges across 50 turns)
 
 - template_id: tmpl_investment_portfolio_review
-  # ... (~40s, 30 turns)
+  # ... (~40 s, 30 turns)
 
 - template_id: tmpl_chat_equity_analyst
   match_rule:
@@ -827,7 +939,7 @@ Both templates registered with apps/api at boot (per `06` §6.3); appear in `<Te
   "page.market_watch.empty":                            "Your watchlist is empty.",
   "page.market_watch.add_symbol":                       "Add a symbol",
   "page.market_watch.refresh":                          "Refresh",
-  "page.market_watch.auto_refresh":                     "Auto-refresh every 30s",
+  "page.market_watch.auto_refresh":                     "Auto-refresh every 30 s",
   "page.market_watch.col.symbol":                       "Symbol",
   "page.market_watch.col.price":                        "Price",
   "page.market_watch.col.change":                       "Change",
@@ -836,14 +948,14 @@ Both templates registered with apps/api at boot (per `06` §6.3); appear in `<Te
   "page.market_watch.row.add_to_portfolio":             "Add to portfolio",
   "page.market_watch.row.remove":                       "Remove",
   "page.market_watch.row.error":                        "Quote unavailable",
-  "page.market_watch.fetch_error":                      "{source} feed unavailable.",
+  "page.market_watch.fetch_error":                      "{{source}} feed unavailable.",
 
   "page.portfolio.heading":                             "Portfolio",
   "page.portfolio.empty":                               "No holdings yet.",
   "page.portfolio.add_holding":                         "Add holding",
   "page.portfolio.import_csv":                          "Import from CSV",
   "page.portfolio.import_csv.placeholder":              "symbol,shares,avg_cost (one per line)",
-  "page.portfolio.import_csv.parse_error":              "Could not parse CSV at line {line}.",
+  "page.portfolio.import_csv.parse_error":              "Could not parse CSV at line {{line}}.",
   "page.portfolio.col.symbol":                          "Symbol",
   "page.portfolio.col.shares":                          "Shares",
   "page.portfolio.col.avg_cost":                        "Avg cost",
@@ -851,8 +963,8 @@ Both templates registered with apps/api at boot (per `06` §6.3); appear in `<Te
   "page.portfolio.col.value":                           "Market value",
   "page.portfolio.col.pnl":                             "P&L",
   "page.portfolio.col.pnl_pct":                         "P&L %",
-  "page.portfolio.summary.total":                       "Total: {amount}",
-  "page.portfolio.summary.day_pnl":                     "Day P&L: {amount} ({pct})",
+  "page.portfolio.summary.total":                       "Total: {{amount}}",
+  "page.portfolio.summary.day_pnl":                     "Day P&L: {{amount}} ({{pct}})",
 
   "report.section.meta":                                "Meeting Information",
   "report.section.thesis":                              "Investment Thesis",
@@ -864,7 +976,7 @@ Both templates registered with apps/api at boot (per `06` §6.3); appear in `<Te
 }
 ```
 
-`zh.json` mirrors with Chinese (e.g., `tab.market_watch: "行情"`, `tab.portfolio: "持仓"`, etc.).
+`zh.json` mirrors with Chinese (e.g., `tab.market_watch: "行情"`, `tab.portfolio: "持仓"`, etc.). Interpolation uses `{{var}}` per react-i18next.
 
 ---
 
@@ -898,7 +1010,7 @@ Different user mental models. Market Watch is "what's happening RIGHT NOW in the
 **Why backend proxies for data feeds (not browser direct fetch).**
 1) API key security: even when keyless today, a future yahoo key would need to live server-side.
 2) CORS bypass: yahoo + akshare don't issue CORS headers for browser calls.
-3) Centralized caching: 30s/60s in-memory cache shared across all users in the process.
+3) Centralized caching: 30 s/60 s in-memory cache shared across all users in the process.
 4) Consistent error envelope: studio-style ErrorBody for upload + agora consistency.
 5) Rate-limit handling: server-side hits the limit once and degrades gracefully for everyone.
 *Considered and rejected.* **Browser direct fetch via JSONP** — security + caching nightmare.
@@ -931,6 +1043,10 @@ Due diligence reports are typically reviewed in PDF and edited in Word. Markdown
 Different review contexts — the summary is for quick partner sign-off (1-page); the DD is for formal investment committee. Two templates cover the 80% use cases without proliferation. Custom templates v0.2.
 *Considered and rejected.* **Single mega-template** — UX confusion for users picking. **Many templates** — analysis paralysis.
 
+**Why hooks (`useYahooQuotes` / `useAkshareQuotes`) own polling + AbortController, not components.**
+React function components re-render every state change; lifting the polling timer + abort discipline into a hook keeps the component body declarative and ensures cleanup happens once per hook instance. The hook's `useEffect` returns a teardown that clears the interval and aborts any in-flight request — covered by `t_mw_unmount_abort`.
+*Considered and rejected.* **Inline `useEffect` in each tab** — duplicate cleanup logic per tab; bug-prone. **Global polling singleton** — can't easily express "stop polling when tab unmounts."
+
 ---
 
 ## §14 Downstream impact
@@ -951,26 +1067,27 @@ Different review contexts — the summary is for quick partner sign-off (1-page)
 ## §15 Pre-merge checklist
 
 - [ ] Mission + Scope present; out-of-scope listed (real-time WebSocket, persisted portfolio, advanced charting, broker integration, sectors, multi-currency, news, earnings calendar)
-- [ ] Module layout (§1) shows deltas vs `_template` (data_sources subdir, shared frontend subdir, 2 stores)
+- [ ] Module layout (§1) shows deltas vs `_template` (data_sources subdir, shared frontend subdir, 2 stores, hooks subdir)
 - [ ] Backend manifest (§2) declares 4 routers + 5 permissions + fixture_overlay="investment" + 2 report_templates
 - [ ] pyproject.toml entry point key matches manifest.vertical_id
-- [ ] Frontend manifest (§3) declares 2 tabs + 1 widget + 2 upload handlers + 2 data feeds + 5-element project_id_in (3 deliberation + 2 chat) + i18n + accent_color + default_route
+- [ ] Frontend manifest (§3) declares 2 tabs + 1 widget + 2 upload handlers + 2 data feeds + 5-element project_id_in (3 deliberation + 2 chat) + i18n + accent_color + default_route; `icon` is `lucide-react` component reference; every `component` field is `React.ComponentType`
 - [ ] 5 permissions (§4) all under `investment:*` namespace; descriptions clear
-- [ ] 2 tabs (§5): MarketWatchTab + PortfolioTab with full props/emits/state/test rows
-- [ ] 1 widget (§6): MarketSummaryWidget renders 3 indices with auto-refresh
-- [ ] 2 upload handlers (§7) frontend + backend with filename heuristic + structured parse
-- [ ] 2 data feeds (§8) with caching (30s yahoo / 60s akshare) + rate limit + permission gate
+- [ ] 2 tabs (§5): MarketWatchTab + PortfolioTab — `.tsx`, props/callbacks, Zustand state, polling via dedicated hooks with AbortController cleanup
+- [ ] 1 widget (§6): MarketSummaryWidget renders 3 indices with auto-refresh; uses `useNavigate()` not router.push
+- [ ] 2 upload handlers (§7) frontend (`.tsx`, props shape: `{upload, onConfirm, onCancel}`) + backend with filename heuristic + structured parse
+- [ ] 2 data feeds (§8) with caching (30 s yahoo / 60 s akshare) + rate limit + permission gate
 - [ ] 2 report templates (§9) with proper template_id prefix + declared_by
 - [ ] Fixture overlay (§10): 5 projects (3 deliberation + 2 chat-*), 5 meeting_templates with realistic event scripts (covering ClaimMade / EvidenceCited / ChallengeRaised / ConsensusReached / MessageEmitted / meeting_finalized — exercising agora's reducers per 01b), 5 outcomes
-- [ ] i18n bundles (§11) cover every user-visible string (tab labels / widget / upload / both pages' content / report sections); zh + en mirrored
+- [ ] i18n bundles (§11) cover every user-visible string (tab labels / widget / upload / both pages' content / report sections); zh + en mirrored; uses `{{var}}` interpolation
 - [ ] Test matrix (§12) covers vertical-level integration tests (boot, perms, tabs visible, switcher, wizard, chathub, knowledge, reports, materials preview, coexistence, removal, purity); 3 marked `[SUB]`
-- [ ] Why-this / why-not (§13) for ≥ 8 load-bearing decisions
+- [ ] Why-this / why-not (§13) for ≥ 9 load-bearing decisions
 - [ ] Downstream impact (§14) lists every spec affected
 - [ ] No engine import (Red Line #1) — vertical only imports from platform-shell + studio-client + standard libs
 - [ ] No cross-vertical import (Red Line #4)
 - [ ] No platform code modification (Red Line #3)
 - [ ] No direct studio HTTP call (Red Line #2) — only via studio-client
 - [ ] No agent / paradigm / skill logic in vertical (Red Line #5) — only references `agent_id`s + `project_id`s as opaque strings
+- [ ] No Vue-only artifacts (`<template>`, `defineProps`, `defineEmits`, `useI18n` from vue-i18n, `Pinia`, `lucide-vue-next`)
 - [ ] Domain vocabulary (investment, financial-report, due-diligence, yahoo-finance, akshare) used freely INSIDE this vertical's package per the philosophy skill's allowlist (`packages/verticals/<id>/`)
 - [ ] `bash scripts/check-purity.sh` exits 0 (vertical's domain words land outside the scanned platform-* / apps/* paths)
 - [ ] File path matches `docs/specs/v0.1/14-vertical-investment-spec.md`
