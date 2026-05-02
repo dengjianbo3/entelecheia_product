@@ -1,9 +1,10 @@
 # 13 — `verticals/_template` v0.1 spec
 
-> **Status**: v0.1 reference template. Lives at `packages/verticals/_template/`.
+> **Status**: v0.1 reference template (React). Lives at `packages/verticals/_template/`.
 > **Consumes**: `02-platform-shell-spec.md` §3 (frontend `VerticalManifest` + `registerVertical`), `06-feature-reports-spec.md` §6.3 (`report_templates`), `09-feature-uploads-spec.md` §1.4 (custom upload handlers).
 > **Used by**: spec 14 (the first concrete vertical, copies + renames `_template`); `15-apps-api-spec.md` §boot (entry-point discovery).
 > **Forwarded to from**: every future vertical pack.
+> **Supersedes**: the Vue version of this spec; React migration per session decision 2026-05-03.
 
 ---
 
@@ -20,12 +21,12 @@ This file defines the canonical `_template/` directory — the **copy-paste star
 **Covers.**
 - The full `packages/verticals/_template/` directory tree.
 - `manifest.py` — backend `VerticalManifest` dataclass with `vertical_id`, `display_name`, `api_routers: list[APIRouter]`, `permissions_declared: list[PermissionDeclaration]`, `studio_fixture_overlay: str | None`, `report_templates: list[ReportTemplate]`.
-- `manifest.ts` — frontend `VerticalManifest` instance with `vertical_id`, `display_name`, `description`, `icon`, `accent_color`, `tabs[]`, `dashboard_widgets[]`, `upload_handlers[]`, `data_feeds[]`, `default_project_filter`, `i18n`, `default_route`.
+- `manifest.ts` — frontend `VerticalManifest` instance with `vertical_id`, `display_name`, `description`, `icon`, `accent_color`, `tabs[]`, `dashboard_widgets[]`, `upload_handlers[]`, `data_feeds[]`, `default_project_filter`, `i18n`, `default_route`. Every `component` field is a `React.ComponentType<P>` (per `02` §3.1).
 - `pyproject.toml` — workspace member with `[project.entry-points."entelecheia_product.verticals"]`.
 - `README.md` — how to fork into a new vertical (the rename steps + a checklist).
 - `api/` — sample FastAPI router (data feed proxy + upload handler endpoint).
-- `frontend/` — sample tab component, widget component, upload handler component.
-- `frontend/i18n/{zh,en}.json` — bundle structure.
+- `frontend/` — sample tab component, widget component, upload handler component (all `.tsx`).
+- `frontend/i18n/{zh,en}.json` — bundle structure (uses `{{var}}` interpolation per react-i18next).
 - `fixture_overlay/` — studio-client fixture overlay structure with one `ProjectSpec` + one `meeting_template`.
 - `tests/` — integration tests verifying registration + isolation.
 - Validation rules the platform applies at registration time (`registerVertical` per `02` §3.2 + apps/api boot per `15`).
@@ -59,21 +60,23 @@ The complete `_template/` layout. Every file shown is part of the template; noth
 packages/verticals/_template/
 ├── pyproject.toml                                # workspace member; entry-point registration
 ├── README.md                                     # how-to-fork checklist
-├── manifest.py                                   # backend VerticalManifest + entry-point target
-├── api/
-│   ├── __init__.py                               # re-exports the routers
-│   ├── routers/
-│   │   ├── __init__.py
-│   │   ├── data.py                               # GET /api/verticals/<id>/data/<feed_id> proxy
-│   │   └── uploads.py                            # POST /api/verticals/<id>/upload/<handler_kind> handler endpoint
-│   ├── permissions.py                            # PERMISSIONS list (declared in manifest)
-│   ├── report_templates/
-│   │   ├── __init__.py
-│   │   └── default_template.py                   # ReportTemplate instance + render hooks
-│   └── tests/
-│       ├── __init__.py
-│       ├── test_data_router.py
-│       └── test_upload_handler.py
+├── src/entelecheia_vertical_template/
+│   ├── __init__.py
+│   ├── manifest.py                               # backend VerticalManifest + entry-point target
+│   └── api/
+│       ├── __init__.py                           # re-exports the routers
+│       ├── routers/
+│       │   ├── __init__.py
+│       │   ├── data.py                           # GET /api/verticals/<id>/data/<feed_id> proxy
+│       │   └── uploads.py                        # POST /api/verticals/<id>/upload/<handler_kind> handler endpoint
+│       ├── permissions.py                        # PERMISSIONS list (declared in manifest)
+│       └── report_templates/
+│           ├── __init__.py
+│           └── default_template.py               # ReportTemplate instance + render hooks
+├── tests_api/
+│   ├── __init__.py
+│   ├── test_data_router.py
+│   └── test_upload_handler.py
 ├── frontend/
 │   ├── package.json                              # local package; depends on @entelecheia/platform-shell
 │   ├── tsconfig.json
@@ -81,18 +84,18 @@ packages/verticals/_template/
 │   │   ├── manifest.ts                           # default-export VerticalManifest
 │   │   ├── components/
 │   │   │   ├── tabs/
-│   │   │   │   └── ExampleTab.vue                # tab content; rendered at /<vertical_id>/example
+│   │   │   │   └── ExampleTab.tsx                # tab content; rendered at /<vertical_id>/example
 │   │   │   ├── widgets/
-│   │   │   │   └── ExampleWidget.vue             # dashboard widget
+│   │   │   │   └── ExampleWidget.tsx             # dashboard widget
 │   │   │   └── handlers/
-│   │   │       └── ExampleUploadHandler.vue      # custom upload-handler UI
+│   │   │       └── ExampleUploadHandler.tsx      # custom upload-handler UI
 │   │   ├── stores/
-│   │   │   └── exampleStore.ts                   # Pinia store; namespaced as vertical.<id>.example
+│   │   │   └── exampleStore.ts                   # Zustand store; namespaced as vertical-<id>-example
 │   │   └── i18n/
 │   │       ├── zh.json                           # vertical's zh strings (merged at registration)
 │   │       └── en.json
 │   └── tests/
-│       ├── ExampleTab.spec.ts
+│       ├── ExampleTab.spec.tsx
 │       └── manifest.spec.ts                      # validates the manifest shape
 ├── fixture_overlay/
 │   ├── projects.yaml                             # vertical's ProjectSpec entries (drop into PseudoStudioClient)
@@ -102,7 +105,7 @@ packages/verticals/_template/
     └── test_registration.py                      # integration: vertical registers cleanly into shell + apps/api
 ```
 
-**Why `api/` + `frontend/` are sibling dirs (not nested under one tree).** Backend (Python uv workspace member) and frontend (npm-style local package) have different tool toolchains. Co-locating them in the same vertical directory keeps the vertical self-contained; siblings keep each toolchain's expectations met.
+**Why `src/entelecheia_vertical_template/` + `frontend/` are siblings (not nested under one tree).** Backend (Python uv workspace member) and frontend (npm-style local package) have different toolchains. Co-locating them in the same vertical directory keeps the vertical self-contained; siblings keep each toolchain's expectations met (Python looks for `src/<module_name>/`; the Vite frontend looks for `frontend/src/`).
 
 ---
 
@@ -236,10 +239,11 @@ PERMISSIONS: list[PermissionDeclaration] = [
 // packages/verticals/_template/frontend/src/manifest.ts
 import type { VerticalManifest } from "@entelecheia/platform-shell";
 import type { ProjectId } from "@entelecheia/studio-client";
+import { Sparkles } from "lucide-react";
 
-import ExampleTab from "./components/tabs/ExampleTab.vue";
-import ExampleWidget from "./components/widgets/ExampleWidget.vue";
-import ExampleUploadHandler from "./components/handlers/ExampleUploadHandler.vue";
+import ExampleTab from "./components/tabs/ExampleTab";
+import ExampleWidget from "./components/widgets/ExampleWidget";
+import ExampleUploadHandler from "./components/handlers/ExampleUploadHandler";
 import zh from "./i18n/zh.json";
 import en from "./i18n/en.json";
 
@@ -248,7 +252,7 @@ const manifest: VerticalManifest = {
   vertical_id: "vertical-template",
   display_name: "Vertical Template",
   description: "Reference template demonstrating every vertical contribution type.",
-  icon: "Sparkles",                              // lucide-vue-next icon name; bundled with apps/frontend
+  icon: Sparkles,                                // React.ComponentType<{ size?: number }>; lucide-react
 
   // appearance (optional)
   accent_color: "#7C3AED",                       // hex; CSS --color-accent override (02 §5.3)
@@ -259,7 +263,7 @@ const manifest: VerticalManifest = {
       id: "example",                              // unique within vertical
       label_key: "vertical.vertical-template.tab.example",
       route_path: "/example",                     // mounts at /vertical-template/example
-      component: ExampleTab,
+      component: ExampleTab,                      // React.ComponentType
       required_permission: "vertical-template:read_data",
       position: 100,                              // ordering hint; lower = earlier
     },
@@ -272,7 +276,7 @@ const manifest: VerticalManifest = {
   dashboard_widgets: [
     {
       id: "example-widget",
-      component: ExampleWidget,
+      component: ExampleWidget,                   // React.ComponentType
       preferred_position: "top-right",
       title_key: "vertical.vertical-template.widget.example.title",
       required_permission: "vertical-template:read_data",
@@ -286,7 +290,7 @@ const manifest: VerticalManifest = {
       label_key: "vertical.vertical-template.upload.example_data",
       accepts: [".json", "application/json"],
       max_size_bytes: 5 * 1024 * 1024,            // 5 MB; per-handler override (default 10 MB)
-      handler_component: ExampleUploadHandler,
+      handler_component: ExampleUploadHandler,    // React.ComponentType<{upload, onConfirm, onCancel}>
       studio_material_kind: "data",               // mapped to studio §3.6 Material kind
     },
   ],
@@ -309,7 +313,7 @@ const manifest: VerticalManifest = {
     ],
   },
 
-  // i18n bundles (merged into vue-i18n at registerVertical time under
+  // i18n bundles (merged into react-i18next at registerVertical time under
   // namespace vertical.<vertical_id>.<key>)
   i18n: { zh, en },
 
@@ -328,7 +332,9 @@ export default manifest;
   "widget.example.title":                   "Example Widget",
   "upload.example_data":                    "Example data file",
   "page.example.heading":                   "Example tab",
-  "page.example.body":                      "Replace this with your vertical's UI."
+  "page.example.body":                      "Replace this with your vertical's UI.",
+  "report.section.meta":                    "Metadata",
+  "report.section.key_facts":               "Key facts"
 }
 ```
 
@@ -340,91 +346,113 @@ export default manifest;
   "widget.example.title":                   "示例小组件",
   "upload.example_data":                    "示例数据文件",
   "page.example.heading":                   "示例标签页",
-  "page.example.body":                      "用本垂直的真实 UI 替换这里。"
+  "page.example.body":                      "用本垂直的真实 UI 替换这里。",
+  "report.section.meta":                    "元数据",
+  "report.section.key_facts":               "关键事实"
 }
 ```
 
-After registration, accessible from anywhere via `useI18n().t("vertical.vertical-template.tab.example")`.
+After registration, accessible from anywhere via `useTranslation().t("vertical.vertical-template.tab.example")`. Interpolation uses `{{var}}` per react-i18next conventions.
 
 ---
 
 ## §5 Sample components
 
-### 5.1 `ExampleTab.vue`
+### 5.1 `ExampleTab.tsx`
 
-```vue
-<!-- packages/verticals/_template/frontend/src/components/tabs/ExampleTab.vue -->
-<script setup lang="ts">
-import { useI18n, useStudio } from "@entelecheia/platform-shell";
-
-const { t } = useI18n();
-const studio = useStudio();   // canonical access to StudioClient (Red Line #2)
-
-// Vertical's local store (per Pinia namespacing convention)
+```tsx
+// packages/verticals/_template/frontend/src/components/tabs/ExampleTab.tsx
+import { useTranslation } from "react-i18next";
+import { useStudio } from "@entelecheia/platform-shell";
 import { useExampleStore } from "../../stores/exampleStore";
-const store = useExampleStore();
-</script>
 
-<template>
-  <section class="example-tab">
-    <h1>{{ t("vertical.vertical-template.page.example.heading") }}</h1>
-    <p>{{ t("vertical.vertical-template.page.example.body") }}</p>
-    <!-- TODO (vertical author): replace with real content -->
-  </section>
-</template>
+export default function ExampleTab() {
+  const { t } = useTranslation();
+  const studio = useStudio();             // canonical access to StudioClient (Red Line #2)
+  const items = useExampleStore(s => s.items);
+
+  return (
+    <section className="example-tab">
+      <h1>{t("vertical.vertical-template.page.example.heading")}</h1>
+      <p>{t("vertical.vertical-template.page.example.body")}</p>
+      {/* TODO (vertical author): replace with real content using `studio` for backend reads */}
+      <ul>
+        {items.map(item => <li key={item.id}>{item.label}</li>)}
+      </ul>
+    </section>
+  );
+}
 ```
 
-### 5.2 `ExampleWidget.vue`
+### 5.2 `ExampleWidget.tsx`
 
-```vue
-<!-- packages/verticals/_template/frontend/src/components/widgets/ExampleWidget.vue -->
-<script setup lang="ts">
-import { useI18n } from "@entelecheia/platform-shell";
-const { t } = useI18n();
-</script>
+```tsx
+// packages/verticals/_template/frontend/src/components/widgets/ExampleWidget.tsx
+import { useTranslation } from "react-i18next";
 
-<template>
-  <article class="example-widget" role="region"
-           :aria-labelledby="`vertical-template-widget-example-title`">
-    <h2 :id="`vertical-template-widget-example-title`">
-      {{ t("vertical.vertical-template.widget.example.title") }}
-    </h2>
-    <!-- TODO: widget content -->
-  </article>
-</template>
+export default function ExampleWidget() {
+  const { t } = useTranslation();
+  const headingId = "vertical-template-widget-example-title";
+  return (
+    <article className="example-widget" role="region" aria-labelledby={headingId}>
+      <h2 id={headingId}>
+        {t("vertical.vertical-template.widget.example.title")}
+      </h2>
+      {/* TODO: widget content */}
+    </article>
+  );
+}
 ```
 
-### 5.3 `ExampleUploadHandler.vue`
+### 5.3 `ExampleUploadHandler.tsx`
 
-```vue
-<!-- packages/verticals/_template/frontend/src/components/handlers/ExampleUploadHandler.vue -->
-<script setup lang="ts">
+```tsx
+// packages/verticals/_template/frontend/src/components/handlers/ExampleUploadHandler.tsx
+import { useTranslation } from "react-i18next";
 import type { Upload } from "@entelecheia/uploads";
-import { useI18n } from "@entelecheia/platform-shell";
 
-const props = defineProps<{
+export interface ExampleUploadHandlerProps {
   upload: Upload;
-}>();
+  onConfirm: (upload_id: string, normalized_content: object) => void;
+  onCancel: () => void;
+}
 
-const emit = defineEmits<{
-  (e: "confirm", upload_id: string, normalized_content: object): void;
-  (e: "cancel"): void;
-}>();
+export default function ExampleUploadHandler({ upload, onConfirm, onCancel }: ExampleUploadHandlerProps) {
+  const { t } = useTranslation();
 
-const { t } = useI18n();
+  // TODO: vertical-specific normalization. The handler may parse / validate /
+  // preview the upload, then call `onConfirm` with a normalized payload that
+  // the wizard inlines as Material.content at run_meeting time (per 09 §7).
+  return (
+    <div className="example-handler">
+      <p>
+        {t("vertical.vertical-template.upload.example_data")}: {upload.display_name}
+      </p>
+      <button onClick={() => onConfirm(upload.upload_id, {})}>Confirm</button>
+      <button onClick={onCancel}>Cancel</button>
+    </div>
+  );
+}
+```
 
-// TODO: vertical-specific normalization. The handler may parse / validate /
-// preview the upload, then emit `confirm` with a normalized payload that
-// the wizard inlines as Material.content at run_meeting time (per 09 §7).
-</script>
+### 5.4 `stores/exampleStore.ts`
 
-<template>
-  <div class="example-handler">
-    <p>{{ t("vertical.vertical-template.upload.example_data") }}: {{ props.upload.display_name }}</p>
-    <button @click="emit('confirm', props.upload.upload_id, {})">Confirm</button>
-    <button @click="emit('cancel')">Cancel</button>
-  </div>
-</template>
+```typescript
+// packages/verticals/_template/frontend/src/stores/exampleStore.ts
+import { create } from "zustand";
+
+interface ExampleItem { id: string; label: string; }
+interface ExampleState {
+  items: ExampleItem[];
+  setItems(items: ExampleItem[]): void;
+}
+
+// Convention: vertical-local Zustand stores name themselves
+// useVerticalIdXxxStore so dev-tools labels and lint rules can find them.
+export const useExampleStore = create<ExampleState>((set) => ({
+  items: [],
+  setItems: (items) => set({ items }),
+}));
 ```
 
 ---
@@ -437,12 +465,12 @@ const { t } = useI18n();
 # packages/verticals/_template/src/entelecheia_vertical_template/api/routers/data.py
 """Sample data feed proxy. Replace with real upstream calls.
 
-Verticals MAY make HTTP requests to *external* sources (per 03 design doc:
+Verticals MAY make HTTP requests to *external* sources (per design doc:
 "data feeds proxy via vertical's own backend routers"). They MUST NOT
 make HTTP requests to studio (Red Line #2; use studio-client instead).
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from entelecheia_auth.deps import require_auth, CurrentAuthContext
 from entelecheia_platform_shell.permissions import require_permission
 
@@ -619,6 +647,7 @@ The platform applies these rules when loading a vertical (per `02` §3.2 + apps/
 | `vertical_id` unique among loaded verticals | apps/api boot | duplicate → `VerticalRegistrationError{reason: "duplicate_id"}` |
 | Frontend `tabs[*].id` unique within manifest | shell registerVertical | duplicate → `VerticalRegistrationError{reason: "duplicate_tab_id"}` |
 | Frontend `tabs[*].route_path` starts with `/` | shell registerVertical | bad → `VerticalRegistrationError{reason: "invalid_route_path"}` |
+| Each tab/widget/handler `component` is a function (React.ComponentType) | shell registerVertical | non-function → `VerticalRegistrationError{reason: "component_not_function"}` |
 | All declared permissions match `^<vertical_id>:[a-z][a-z0-9_]*$` | apps/api boot | mismatch → registration aborts with reason |
 | `report_templates[*].template_id` matches `^<vertical_id>:[a-z][a-z0-9_-]*$` | apps/api boot | mismatch → 06 §6.3 `TemplateRegistrationError` |
 | `report_templates[*].declared_by == vertical_id` | apps/api boot | mismatch → same error |
@@ -660,7 +689,7 @@ mv "src/entelecheia_vertical_template" "src/$NEW_PY_MODULE"
 # vertical_id: vertical-template → ${NEW_ID}
 # Python module: entelecheia_vertical_template → ${NEW_PY_MODULE}
 # Python dist:   entelecheia-vertical-template → ${NEW_PY_DIST}
-find . -type f \( -name '*.py' -o -name '*.ts' -o -name '*.vue' -o -name '*.json' -o -name '*.toml' -o -name '*.yaml' -o -name '*.md' \) -print0 \
+find . -type f \( -name '*.py' -o -name '*.ts' -o -name '*.tsx' -o -name '*.json' -o -name '*.toml' -o -name '*.yaml' -o -name '*.md' \) -print0 \
   | xargs -0 sed -i.bak \
       -e "s/vertical-template/${NEW_ID}/g" \
       -e "s/entelecheia_vertical_template/${NEW_PY_MODULE}/g" \
@@ -676,13 +705,13 @@ echo "Then: cd ../../.. && uv sync --all-packages && bash scripts/check-purity.s
 **Manual checklist after running** (the README repeats these):
 
 1. Edit `manifest.py` `display_name` to a human-readable string.
-2. Edit `manifest.ts` `display_name`, `description`, `icon`, `accent_color`.
+2. Edit `manifest.ts` `display_name`, `description`, `icon` (replace `Sparkles` with another `lucide-react` export), `accent_color`.
 3. Edit `i18n/{zh,en}.json` to localize strings.
 4. Replace `proj-template-alpha` / `proj-template-beta` in `default_project_filter.project_id_in` with real `spec_id`s the vertical's PseudoStudioClient overlay (or the live studio) exposes.
 5. Update `fixture_overlay/projects.yaml` + `meeting_templates.yaml` + `outcomes.yaml` with realistic vertical-specific content.
 6. Update permissions in `api/permissions.py` to match real verbs the vertical needs.
 7. Replace stub data feed in `api/routers/data.py` with real upstream calls.
-8. Replace example tab / widget / handler with real domain content.
+8. Replace example tab / widget / handler with real domain content (`.tsx` files).
 9. Run `bash scripts/check-purity.sh` — must exit 0.
 10. Run `uv sync --all-packages` — workspace must accept the new member.
 11. Run vertical's `tests/` — substitution + isolation tests must pass.
@@ -707,8 +736,8 @@ echo "Then: cd ../../.. && uv sync --all-packages && bash scripts/check-purity.s
 |---|---|---|
 | All declared permissions land in auth-service registry at boot | `GET /api/auth/permissions` returns the union | `t_vt_perm_register` |
 | Permission with malformed prefix (not `<vertical_id>:`) | apps/api boot raises; vertical registration aborts | `t_vt_perm_bad_prefix` |
-| User with vertical permission can access tab | route guard + PermissionGate both pass | `t_vt_perm_ui_grant` |
-| User without vertical permission cannot access tab | tab hidden in nav; route guard redirects | `t_vt_perm_ui_deny` |
+| User with vertical permission can access tab | route loader + `<PermissionGate>` both pass | `t_vt_perm_ui_grant` |
+| User without vertical permission cannot access tab | tab hidden in nav; route loader redirects | `t_vt_perm_ui_deny` |
 
 ### 11.3 Fixture overlay
 
@@ -735,6 +764,15 @@ echo "Then: cd ../../.. && uv sync --all-packages && bash scripts/check-purity.s
 | Custom handler appears in HandlerPicker when vertical active | useUploadHandlers returns vertical's + platform's | `t_vt_upload_handler_listed` |
 | Upload via custom handler accepts only declared MIME | non-matching file rejected client-side + server-side | `t_vt_upload_handler_mime_filter` |
 | Custom upload endpoint requires permission | user without `vertical-template:upload_example` → 403 | `t_vt_upload_perm_gate` |
+
+### 11.6 React component contract
+
+| scenario | expected | test_id |
+|---|---|---|
+| Tab `component` is a React function component | typeof component === "function" | `t_vt_tab_component_is_fn` |
+| Widget `component` is a React function component | typeof component === "function" | `t_vt_widget_component_is_fn` |
+| UploadHandler `handler_component` accepts {upload, onConfirm, onCancel} props | rendering with valid props does not warn | `t_vt_handler_props_shape` |
+| `icon` is a renderable React component (lucide-react) | <Icon size={16} /> renders without throw | `t_vt_icon_renderable` |
 
 ---
 
@@ -780,13 +818,21 @@ Authors copying the template see the complete mapping: tabs, widgets, upload han
 Red Line #4 ("verticals never import each other") is mechanically catchable; relying on reviewer judgment is unreliable as the platform grows. The script's regex catches `from entelecheia_vertical_*` and `from packages.verticals.*` patterns inside individual vertical packages.
 *Considered and rejected.* **Reviewer judgment only** — drifts as more verticals land.
 
+**Why each vertical owns its Zustand store (no shared store).**
+A vertical's UI state (selected items, local filters, draft inputs) is private to the vertical. A shared store would pull domain knowledge into the shell, breaking the platform-stable rule (P4). Each vertical's store is namespaced (`useVerticalIdXxxStore`) so dev-tools and lint rules can disambiguate.
+*Considered and rejected.* **Single platform-wide store with vertical-scoped slices** — couples shell to vertical state shape.
+
+**Why `icon` is a React component reference (not a string).**
+Vue's icon libraries (lucide-vue-next) often expect string keys; React's lucide-react ships icons as React components, naturally tree-shakeable when imported by name. Storing the component reference avoids a registry lookup at render time and lets bundlers prove which icons each vertical uses (so the bundle includes only those).
+*Considered and rejected.* **Icon name string + central registry** — registers every icon "just in case"; loses tree-shaking. **Inline SVG string** — bypasses the icon library's accessibility props (title, aria-label).
+
 ---
 
 ## §13 Downstream impact
 
 | Spec | Adjustment |
 |---|---|
-| `02-platform-shell-spec.md` | This template is the canonical instance of `VerticalManifest`. If 02's interface adds a field in v0.x, the template MUST add it (additively, with a placeholder value). |
+| `02-platform-shell-spec.md` | This template is the canonical instance of `VerticalManifest` whose `component` fields are `React.ComponentType`. If 02's interface adds a field in v0.x, the template MUST add it (additively, with a placeholder value). |
 | `03-auth-service-spec.md` | Permission registration at boot consumes `PERMISSIONS` list; per-vertical-id namespace enforced (already declared in 03 §5.3). |
 | `06-feature-reports-spec.md` | The `<vertical_id>:default` template prefix convention enforced at registration (already in 06 §6.3). |
 | `09-feature-uploads-spec.md` | Custom upload handler example demonstrates the `UploadHandlerContribution` interface (already in 09 §1.4). |
@@ -800,23 +846,24 @@ Red Line #4 ("verticals never import each other") is mechanically catchable; rel
 ## §14 Pre-merge checklist
 
 - [ ] Mission + Scope present; out-of-scope listed (hot-reload, versioning, vertical-to-vertical, vertical-shipped agents, theme override beyond accent, vertical middleware)
-- [ ] Directory tree (§1) enumerates every file
+- [ ] Directory tree (§1) enumerates every file (no `.vue`; only `.tsx` for frontend components)
 - [ ] `pyproject.toml` (§2) declares `[project.entry-points."entelecheia_product.verticals"]`; key matches manifest.vertical_id
 - [ ] Backend `manifest.py` (§3) instantiates `VerticalManifest` with all 5 declarable kinds (api_routers, permissions, fixture_overlay, report_templates, vertical_id+display_name)
-- [ ] Frontend `manifest.ts` (§4) instantiates `VerticalManifest` with all contribution types per 02 §3.1
-- [ ] Sample components (§5) for tab, widget, upload handler — all importing from `@entelecheia/platform-shell` (no engine, no studio direct)
+- [ ] Frontend `manifest.ts` (§4) instantiates `VerticalManifest` with all contribution types per 02 §3.1; every `component` is `React.ComponentType`; `icon` is a `lucide-react` component reference
+- [ ] Sample components (§5) for tab, widget, upload handler — all `.tsx`, importing from `@entelecheia/platform-shell`, using `useTranslation` from react-i18next (no `useI18n()` Vue artifact)
 - [ ] Sample backend routers (§6) include data feed proxy + custom upload endpoint; both go through `require_auth` + `require_permission`
 - [ ] Sample report template (§7) declares template_id with `<vertical_id>:` prefix matching declared_by
 - [ ] Studio fixture overlay (§8) covers projects.yaml + meeting_templates.yaml + outcomes.yaml with at least 1 entry each
-- [ ] Validation rules table (§9) covers all 13 rules with source-of-validation (boot vs registration vs CI)
-- [ ] Fork-to script (§10) + manual checklist for what to edit after running
-- [ ] Test matrix (§11): substitution tests (5), permission tests (4), fixture tests (5), report template tests (3), upload handler tests (3) — ≥ 20 rows total
-- [ ] Why-this / why-not (§12) for ≥ 8 load-bearing decisions
+- [ ] Validation rules table (§9) covers all rules with source-of-validation (boot vs registration vs CI), including the React-specific "component is function" check
+- [ ] Fork-to script (§10) handles `.tsx` extension in find-replace; manual checklist updated for React
+- [ ] Test matrix (§11): substitution tests (5), permission tests (4), fixture tests (5), report template tests (3), upload handler tests (3), React contract tests (4) — ≥ 24 rows total
+- [ ] Why-this / why-not (§12) for ≥ 11 load-bearing decisions
 - [ ] Downstream impact (§13) lists every spec affected
 - [ ] No business / domain / product / agent-role string literals (uses neutral `vertical-template`, `agent-x`, `agent-y`, `proj-template-alpha`, etc.)
 - [ ] No `from entelecheia` / `import entelecheia` (Red Line #1)
 - [ ] No `from entelecheia_studio` / `import entelecheia_studio` (Red Line #5)
 - [ ] No `from entelecheia_vertical_*` outside the vertical's own package (Red Line #4)
 - [ ] No HTTP calls to studio (Red Line #2 — vertical's data feeds may call EXTERNAL URLs but not studio)
+- [ ] No Vue-only artifacts (`<template>`, `defineProps`, `defineEmits`, `useI18n` from vue-i18n, `Pinia`, `lucide-vue-next`)
 - [ ] `bash scripts/check-purity.sh` exits 0
 - [ ] File path matches `docs/specs/v0.1/13-vertical-template-spec.md`
