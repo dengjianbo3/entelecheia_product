@@ -6,9 +6,9 @@ on:
     branches: [main]
     # Doc-only / config-only pushes do not trigger CI. Spec-writing during the
     # planning phase produces ~1 commit per push under docs/specs/; running the
-    # full quality gate stack on those is wasteful AND (when no source exists
-    # yet to lint) used to fail the run with "no jobs ran" → noisy failure
-    # emails. paths-ignore bypasses the trigger entirely for these paths.
+    # full quality gate stack on those is wasteful AND used to manifest as
+    # noisy "failure" emails (16 over Day 0 + spec phase). paths-ignore
+    # bypasses the trigger entirely for these paths.
     paths-ignore:
       - "docs/**"
       - "**.md"
@@ -25,14 +25,40 @@ on:
       - ".claude/**"
 
 jobs:
-  # Always-runs job. Guarantees at least one job per CI invocation, which
-  # prevents GitHub Actions' "no jobs ran" → workflow-level failure mode that
-  # bit us 16 times during Day 0 + spec phase. Also pulls scripts/check-purity.sh
-  # into actual CI rather than relying on developers running it locally.
+  # Always-runs job. Two roles:
+  #   1. Detects what kind of source code exists (Python / Frontend) and
+  #      exposes flags via job outputs. Downstream jobs gate on these
+  #      outputs in their own `if:` — the only way to do conditional jobs
+  #      since hashFiles() is not allowed in job-level `if:` (this was the
+  #      original Day 0 bug: every CI run from 2026-04-29 to 2026-05-02
+  #      failed with 0 jobs because hashFiles in `if:` is a parser error
+  #      that GitHub silently rejects the whole workflow over).
+  #   2. Runs scripts/check-purity.sh in CI for real (not just locally) and
+  #      verifies repo-level invariants. Guarantees ≥1 job per CI invocation,
+  #      so the run never reports the "0 jobs" failure mode again.
   scaffolding-check:
     runs-on: ubuntu-latest
+    outputs:
+      has_python:   ${{ steps.detect.outputs.has_python }}
+      has_frontend: ${{ steps.detect.outputs.has_frontend }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Detect what source exists (output flags for downstream jobs)
+        id: detect
+        run: |
+          set -euo pipefail
+          if find packages apps -name '*.py' -type f -print -quit 2>/dev/null | grep -q .; then
+            echo "has_python=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_python=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -f apps/frontend/package.json ]; then
+            echo "has_frontend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "detected: python=$(cat $GITHUB_OUTPUT | grep has_python) frontend=$(cat $GITHUB_OUTPUT | grep has_frontend)"
 
       - name: Purity gate (no engine internals; no business words in platform-*; vertical isolation; deprecated 'roundtable' naming)
         run: bash scripts/check-purity.sh
@@ -48,11 +74,7 @@ jobs:
   python-quality-gates:
     runs-on: ubuntu-latest
     needs: scaffolding-check
-    # Only runs when actual Python source exists in packages/* or apps/*.
-    # During Day 0 + spec phase the workspace dirs are .gitkeep placeholders;
-    # uv sync would fail. Once any package adds its first .py file the job
-    # engages automatically.
-    if: hashFiles('packages/**/*.py', 'apps/**/*.py') != ''
+    if: needs.scaffolding-check.outputs.has_python == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -82,9 +104,7 @@ jobs:
   frontend-quality-gates:
     runs-on: ubuntu-latest
     needs: scaffolding-check
-    # Only runs when frontend code (apps/frontend/package.json) exists.
-    # During Day 0 + spec phase this is absent.
-    if: hashFiles('apps/frontend/package.json') != ''
+    if: needs.scaffolding-check.outputs.has_frontend == 'true'
     defaults:
       run:
         working-directory: apps/frontend
