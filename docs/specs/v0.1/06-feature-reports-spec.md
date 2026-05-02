@@ -1,9 +1,10 @@
 # 06 — `reports` feature v0.1 spec
 
-> **Status**: v0.1 contract for the report-rendering feature.
+> **Status**: v0.1 contract for the report-rendering feature. **Frontend stack**: React 18 + TypeScript + Zustand + React Router v6 + react-i18next + Tailwind, plus `react-markdown` + `remark-gfm` (preview rendering of Markdown output).
 > **Lives at**: `packages/platform-features/reports/` (frontend) + `apps/api/reports/` (server-side renderers per `15-apps-api-spec.md`).
-> **Consumes**: `01-studio-client-spec.md` §5.1 (`OutcomeResponse` + `MeetingOutcome`), `01-studio-client-spec.md` §7.9 (`get_meeting_outcome`), `02-platform-shell-spec.md` (composables + routing + permissions), `13-vertical-template-spec.md` (`report_templates` field in vertical backend manifest).
-> **Forwarded to from**: `05-feature-agora-spec.md` ("View report" navigates here when meeting is finalized).
+> **Consumes**: `01-studio-client-spec.md` §5.1 (`OutcomeResponse` + `MeetingOutcome`), `01-studio-client-spec.md` §7.9 (`get_meeting_outcome`), `02-platform-shell-spec.md` (hooks + routing + permissions), `13-vertical-template-spec.md` (`report_templates` field in vertical backend manifest).
+> **Forwarded to from**: `05-feature-agora-spec.md` ("View report" callback navigates here when meeting is finalized).
+> **Supersedes**: the Vue version of this spec (committed in `bb9b804`); React migration per session decision 2026-05-03.
 
 ---
 
@@ -11,7 +12,7 @@
 
 This file defines the reports feature — the product-side renderer that turns a finalized `MeetingOutcome` into a downloadable artifact (PDF / Word / Excel / Markdown). Per `01-studio-client-spec.md` §11.3, studio does NOT render reports; product is the renderer. Templates are per-vertical-extensible: a vertical's backend manifest may declare additional templates that show up alongside the platform defaults.
 
-**Hard rule** (P3 boundary): rendering is **deterministic transformation**, not reasoning. PDF/Word/Excel renderers run in `apps/api` (server-side, pure Python with reportlab / python-docx / openpyxl); Markdown renders client-side. Studio is uninvolved beyond providing the source `MeetingOutcome`. Templates are data + small render functions — never paradigm logic, never LLM calls.
+**Hard rule** (P3 boundary): rendering is **deterministic transformation**, not reasoning. PDF/Word/Excel renderers run in `apps/api` (server-side, pure Python with reportlab / python-docx / openpyxl); Markdown renders client-side as a pure string template + is displayed via `react-markdown`. Studio is uninvolved beyond providing the source `MeetingOutcome`. Templates are data + small render functions — never paradigm logic, never LLM calls.
 
 ---
 
@@ -20,14 +21,14 @@ This file defines the reports feature — the product-side renderer that turns a
 **Covers.**
 - Module layout (frontend feature package + server-side renderers in apps/api).
 - Single route: `/platform/reports/:meeting_id`. Listing past reports = listing finished meetings = knowledge browser's job (spec 07); reports has no list view of its own.
-- 5 Vue components: `<ReportView>`, `<ReportHeader>`, `<TemplatePicker>`, `<FormatPicker>`, `<RenderPreview>`, `<ExportControls>`, `<ReportFooter>`.
-- 2 composables: `useReportRender` (wraps the render API), `useReportTemplates` (lists available templates).
-- 4 output formats with render contracts: PDF (server), Word (server), Excel (server), Markdown (client).
-- Template system: `ReportTemplate` interface + the 2 platform default templates (`default-comprehensive`, `default-summary`) + the per-vertical extension mechanism.
+- 6 React components: `<ReportView>`, `<ReportHeader>`, `<TemplatePicker>`, `<FormatPicker>`, `<RenderPreview>`, `<ExportControls>`, `<ReportFooter>`.
+- 2 React hooks: `useReportRender` (wraps the render API), `useReportTemplates` (lists available templates).
+- 4 output formats with render contracts: PDF (server), Word (server), Excel (server), Markdown (client text + client display).
+- Template system: `ReportTemplate` interface + the 2 platform default templates (`platform:default-comprehensive`, `platform:default-summary`) + the per-vertical extension mechanism.
 - `POST /api/reports/render` apps/api endpoint that accepts `{meeting_id, format, template_id}` and returns artifact bytes (or `Retry-After` if studio outcome not ready).
 - `GET /api/reports/templates` apps/api endpoint that lists templates available to the active user / vertical.
 - Lifecycle: fetch outcome → preview → export.
-- Sealed error taxonomy (5 leaves).
+- Sealed error taxonomy (5 leaves: 2 owned + auth-relayed listed).
 - Test matrix per renderer + per component.
 - Forward-compat: unknown `concluded_by` enum values render to a generic "Concluded" header.
 
@@ -58,19 +59,19 @@ This file defines the reports feature — the product-side renderer that turns a
 packages/platform-features/reports/
 ├── src/
 │   ├── index.ts                            # exports: ReportView + reportsRoutes
-│   ├── ReportView.vue                      # top-level view at /platform/reports/:meeting_id
+│   ├── ReportView.tsx                      # top-level view at /platform/reports/:meeting_id
 │   ├── components/
-│   │   ├── ReportHeader.vue                # title + project + dates + concluded_by chip
-│   │   ├── TemplatePicker.vue              # dropdown of available templates
-│   │   ├── FormatPicker.vue                # 4 buttons: PDF / Word / Excel / Markdown
-│   │   ├── RenderPreview.vue               # always-on Markdown preview (client-rendered)
-│   │   ├── ExportControls.vue              # export, copy, share-link buttons
-│   │   └── ReportFooter.vue                # merkle_root + render metadata
-│   ├── composables/
-│   │   ├── useReportRender.ts              # wraps POST /api/reports/render; returns bytes blob
+│   │   ├── ReportHeader.tsx                # title + project + dates + concluded_by chip
+│   │   ├── TemplatePicker.tsx              # dropdown of available templates
+│   │   ├── FormatPicker.tsx                # 4 buttons: PDF / Word / Excel / Markdown
+│   │   ├── RenderPreview.tsx               # always-on rendered Markdown preview (via react-markdown)
+│   │   ├── ExportControls.tsx              # export, copy, share-link buttons
+│   │   └── ReportFooter.tsx                # merkle_root + render metadata
+│   ├── hooks/
+│   │   ├── useReportRender.ts              # wraps POST /api/reports/render; returns Blob + triggers download
 │   │   └── useReportTemplates.ts           # wraps GET /api/reports/templates
 │   ├── render/
-│   │   └── markdown.ts                     # client-side MD renderer (no external lib)
+│   │   └── markdown.ts                     # client-side MD text generator (pure string template; no library)
 │   ├── routes.ts
 │   ├── permissions.ts
 │   └── i18n/
@@ -78,10 +79,12 @@ packages/platform-features/reports/
 │       └── en.json
 ├── tests/
 │   ├── components/
-│   ├── composables/
+│   ├── hooks/
 │   └── render/
 │       └── markdown-snapshots/
-├── package.json
+├── package.json                            # depends on react, react-dom, react-router-dom,
+│                                           #            zustand, react-i18next,
+│                                           #            react-markdown, remark-gfm
 └── tsconfig.json
 ```
 
@@ -122,21 +125,22 @@ export const REPORTS_PERMISSIONS = [
 
 ```typescript
 // packages/platform-features/reports/src/routes.ts
-import type { RouteRecordRaw } from "vue-router";
+import { type RouteObject, redirect } from "react-router-dom";
+import { makePermissionLoader } from "@entelecheia/platform-shell";
 
-export const reportsRoutes: RouteRecordRaw[] = [
+export const reportsRoutes: RouteObject[] = [
   {
     path: "/platform/reports/:meeting_id",
-    name: "report",
-    component: () => import("./ReportView.vue"),
-    meta: {
-      required_permissions: ["platform:render_report"],
-      title_key: "feature.reports.title",
+    lazy: async () => {
+      const { ReportView } = await import("./ReportView");
+      return { Component: ReportView };
     },
+    loader: makePermissionLoader("platform:render_report"),
+    handle: { title_key: "feature.reports.title" },
   },
   {
     path: "/platform/reports",
-    redirect: "/platform/knowledge",        // listing past meetings is knowledge's job
+    loader: () => redirect("/platform/knowledge"),        // listing past meetings is knowledge's job
   },
 ];
 ```
@@ -148,33 +152,48 @@ export const reportsRoutes: RouteRecordRaw[] = [
 ### 2.1 Component contract — `<ReportView>`
 
 ```typescript
-export default defineComponent({
-  setup() {
-    const route = useRoute();
-    const meeting_id = computed(() => route.params.meeting_id as string);
+import { useParams } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useStudio } from "@entelecheia/platform-shell";
+import { useReportRender } from "./hooks/useReportRender";
+import { useReportTemplates } from "./hooks/useReportTemplates";
+import type { OutcomeResponse } from "@entelecheia/studio-client";
 
-    // Fetch outcome
-    const studio = useStudio();
-    const { data: outcome, isLoading: isOutcomeLoading, error: outcomeError } = useAsyncState(
-      () => studio.get_meeting_outcome({ meeting_id: meeting_id.value }),
-      null,
-      { resetOnExecute: true }
-    );
+export function ReportView() {
+  const { meeting_id } = useParams<{ meeting_id: string }>();
+  if (!meeting_id) throw new Error("ReportView requires meeting_id route param");
 
-    // Templates (depends on active vertical)
-    const { templates } = useReportTemplates();
+  const studio = useStudio();
 
-    // Selected template + format (UI state)
-    const selectedTemplate = ref("default-comprehensive");
-    const selectedFormat = ref<ReportFormat>("pdf");
+  // Fetch outcome (initial + on meeting_id change)
+  const [outcome, setOutcome] = useState<OutcomeResponse | null>(null);
+  const [outcomeLoading, setOutcomeLoading] = useState(true);
+  const [outcomeError, setOutcomeError] = useState<unknown>(null);
 
-    // Render trigger
-    const { render, isRendering, lastError, lastBytes } = useReportRender();
+  useEffect(() => {
+    let cancelled = false;
+    setOutcomeLoading(true);
+    setOutcome(null);
+    setOutcomeError(null);
+    studio.get_meeting_outcome({ meeting_id })
+      .then(r => { if (!cancelled) setOutcome(r); })
+      .catch(e => { if (!cancelled) setOutcomeError(e); })
+      .finally(() => { if (!cancelled) setOutcomeLoading(false); });
+    return () => { cancelled = true; };
+  }, [meeting_id, studio]);
 
-    return { outcome, isOutcomeLoading, outcomeError, templates,
-             selectedTemplate, selectedFormat, render, isRendering, lastError };
-  },
-});
+  // Templates (depends on active vertical)
+  const { templates } = useReportTemplates();
+
+  // Selected template + format (UI state)
+  const [selectedTemplate, setSelectedTemplate] = useState<string>("platform:default-comprehensive");
+  const [selectedFormat, setSelectedFormat] = useState<ReportFormat>("pdf");
+
+  // Render trigger
+  const { render, isRendering, lastError } = useReportRender();
+
+  // ...render switch over status states (per §2.2)
+}
 ```
 
 ### 2.2 Status states
@@ -183,17 +202,17 @@ export default defineComponent({
 
 | State | Trigger | Visual |
 |---|---|---|
-| `loading_outcome` | `isOutcomeLoading = true` | full-page spinner with "Loading outcome…" |
+| `loading_outcome` | `outcomeLoading === true` | full-page spinner with "Loading outcome…" |
 | `outcome_not_ready` | `outcomeError instanceof MeetingNotReady` | placeholder "Meeting still in progress; report becomes available when finalized" + back link to agora |
 | `outcome_not_found` | `outcomeError instanceof NotFound` | 404 page |
 | `outcome_failed` | `outcomeError instanceof MeetingFailed` | "This meeting failed; no report available" + back link |
-| `ready` | `outcome.value` is non-null with `outcome.outcome` non-null | full UI: header + pickers + preview + export controls |
+| `ready` | `outcome` non-null with `outcome.outcome` non-null | full UI: header + pickers + preview + export controls |
 
 If `outcome.outcome` is null but `outcome.error` is non-null (per `01` §5.1's `OutcomeResponse` envelope where one of the two is non-null), treat as `outcome_failed`.
 
 ### 2.3 Permission check
 
-Route guard ensures `platform:render_report`. Per-meeting visibility enforced by studio (returns `MeetingNotFound` → surfaces here as `outcome_not_found`).
+Route loader (`makePermissionLoader("platform:render_report")` from spec 02) ensures permission. Per-meeting visibility enforced by studio (returns `MeetingNotFound` → surfaces here as `outcome_not_found`).
 
 ---
 
@@ -214,7 +233,7 @@ Route guard ensures `platform:render_report`. Per-meeting visibility enforced by
 └──────────────────────────────────────────┴───────────────────────────────┘
 ```
 
-Two-column: preview takes ~70%, controls ~30%.
+Two-column via Tailwind grid: preview takes ~70%, controls ~30%.
 
 ### 3.2 Mobile (< 640 px)
 
@@ -227,12 +246,12 @@ Single column: header → controls (sticky bottom bar) → preview (full width).
 ### 4.1 `<ReportHeader>`
 
 ```typescript
-interface ReportHeaderProps {
-  outcome: OutcomeResponse;       // assumed loaded
+export interface ReportHeaderProps {
+  outcome:        OutcomeResponse;       // assumed loaded
+  onBackClicked?: () => void;             // back to agora or knowledge
 }
-interface ReportHeaderEmits {
-  (e: "back-clicked"): void;       // back to agora or knowledge
-}
+
+export function ReportHeader(props: ReportHeaderProps): React.ReactElement;
 ```
 
 **Renders.** Project name (from `outcome.project_id`; lookup name via cached `useStudio().get_project()`), `topic` (truncated), `concluded_at` formatted, `concluded_by` rendered as a colored chip:
@@ -250,29 +269,29 @@ interface ReportHeaderEmits {
 ### 4.2 `<TemplatePicker>`
 
 ```typescript
-interface TemplatePickerProps {
+export interface TemplatePickerProps {
   templates:        ReportTemplate[];
-  modelValue:       string;             // template_id
+  value:            string;             // template_id (controlled)
   format:           ReportFormat;        // current format; templates filtered to those that support it
+  onChange:         (template_id: string) => void;
 }
-interface TemplatePickerEmits {
-  (e: "update:modelValue", template_id: string): void;
-}
+
+export function TemplatePicker(props: TemplatePickerProps): React.ReactElement;
 ```
 
-**Renders.** Dropdown listing templates whose `formats` array includes the current `format`. Defaults to `default-comprehensive`.
+**Renders.** Dropdown listing templates whose `formats` array includes the current `format`. Defaults to `platform:default-comprehensive`.
 
-If a template stops supporting the current format (theoretical edge case across vertical reloads), the picker auto-selects the first compatible template and emits `update:modelValue`.
+If a template stops supporting the current format (theoretical edge case across vertical reloads), the picker auto-selects the first compatible template and calls `onChange` via `useEffect` watching `format`.
 
 ### 4.3 `<FormatPicker>`
 
 ```typescript
-interface FormatPickerProps {
-  modelValue: ReportFormat;     // "pdf" | "word" | "excel" | "markdown"
+export interface FormatPickerProps {
+  value:    ReportFormat;     // "pdf" | "word" | "excel" | "markdown"
+  onChange: (format: ReportFormat) => void;
 }
-interface FormatPickerEmits {
-  (e: "update:modelValue", format: ReportFormat): void;
-}
+
+export function FormatPicker(props: FormatPickerProps): React.ReactElement;
 ```
 
 **Renders.** 4 segmented buttons (PDF / Word / Excel / Markdown). Selecting Markdown updates the preview live (client-side render); selecting any other format leaves preview unchanged but updates which renderer the export button calls.
@@ -280,33 +299,56 @@ interface FormatPickerEmits {
 ### 4.4 `<RenderPreview>`
 
 ```typescript
-interface RenderPreviewProps {
+export interface RenderPreviewProps {
   outcome:       OutcomeResponse;
   template_id:   string;
 }
+
+export function RenderPreview(props: RenderPreviewProps): React.ReactElement;
 ```
 
-**Renders.** Always shows the Markdown rendering of the selected template (client-side via `render/markdown.ts`). This is the canonical preview — it lets the user see content WITHOUT triggering an export round trip.
+**Renders.**
+1. Generates Markdown TEXT from the selected template via `render/markdown.ts` (the same logic as the server-side `render_markdown.py` — see §5.5).
+2. Displays the rendered Markdown via `<ReactMarkdown remarkPlugins={[remarkGfm]}>` so the user sees formatted text (not raw `**bold**` syntax).
 
-**Why Markdown is the preview.** Lightest to render; no library dependency; reads well in browser; matches the structured data shape; format-agnostic for layout decisions.
+```tsx
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { renderMarkdown } from "../render/markdown";
+
+export function RenderPreview({ outcome, template_id }: RenderPreviewProps) {
+  const template = useTemplateRegistry().get(template_id);
+  if (!template) return <EmptyState message_key="feature.reports.template_not_available" />;
+
+  const md = renderMarkdown(outcome, template);   // pure string; deterministic
+
+  return (
+    <article className="prose max-w-none">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{md}</ReactMarkdown>
+    </article>
+  );
+}
+```
+
+**Why Markdown is the preview.** Lightest to render; shared template logic with the server-side Markdown renderer (cross-language parity test enforces); reads well in browser; matches the structured data shape; format-agnostic for layout decisions.
 
 **Empty state.** If `template_id` is unknown (404 from `useReportTemplates`), shows "Template not available." with a button to switch to default.
 
 ### 4.5 `<ExportControls>`
 
 ```typescript
-interface ExportControlsProps {
+export interface ExportControlsProps {
   outcome:        OutcomeResponse;
   template_id:    string;
   format:         ReportFormat;
   isRendering:    boolean;
   lastError:      string | null;
+  onExportClicked:        () => void;
+  onCopyClipboardClicked: () => void;       // copies Markdown text only
+  onShareLinkClicked:     () => void;       // copies the URL of /platform/reports/:meeting_id
 }
-interface ExportControlsEmits {
-  (e: "export-clicked"): void;
-  (e: "copy-clipboard-clicked"): void;       // copies Markdown text only
-  (e: "share-link-clicked"): void;           // copies the URL of /platform/reports/:meeting_id
-}
+
+export function ExportControls(props: ExportControlsProps): React.ReactElement;
 ```
 
 **Renders.** Primary button "Export <format>"; secondary "Copy as Markdown" (always available client-side); tertiary "Copy link". Disabled state during `isRendering`. Below button: error message if `lastError`.
@@ -314,9 +356,11 @@ interface ExportControlsEmits {
 ### 4.6 `<ReportFooter>`
 
 ```typescript
-interface ReportFooterProps {
+export interface ReportFooterProps {
   outcome: OutcomeResponse;
 }
+
+export function ReportFooter(props: ReportFooterProps): React.ReactElement;
 ```
 
 **Renders.** Small gray text:
@@ -422,7 +466,7 @@ def render_excel(outcome: MeetingOutcome, template: ReportTemplate) -> bytes:
 
 ```typescript
 // Client signature
-export function renderMarkdown(outcome: MeetingOutcome, template: ReportTemplate): string;
+export function renderMarkdown(outcome: OutcomeResponse, template: ReportTemplate): string;
 ```
 
 ```python
@@ -441,7 +485,13 @@ def render_markdown(outcome: MeetingOutcome, template: ReportTemplate) -> bytes:
 - `## Constraints` (table)
 - `---\n*Audit anchor: {merkle_root}*`
 
-**Why client-side Markdown render.** Always-available preview in `<RenderPreview>` without a server round trip; lets users see the content + skim before exporting; <100 LOC.
+**Why client-side Markdown render** (text generation, not display). The TEXT generation runs client-side so `<RenderPreview>` can show a preview without a server round trip; <100 LOC; the rendered DOM uses `react-markdown` (see §4.4) for display.
+
+**Two distinct concerns**:
+1. **Markdown text generation** (`render/markdown.ts`) — pure function, no UI, language-parallel with server.
+2. **Markdown display in browser** (`react-markdown` in `<RenderPreview>`) — UI concern, React-specific.
+
+The cross-language parity test (`t_md_parity_client_server`) covers (1); React Testing Library tests cover (2).
 
 ---
 
@@ -450,7 +500,7 @@ def render_markdown(outcome: MeetingOutcome, template: ReportTemplate) -> bytes:
 ### 6.1 Template interface
 
 ```typescript
-// packages/platform-features/reports/src/composables/useReportTemplates.ts
+// packages/platform-features/reports/src/hooks/useReportTemplates.ts
 
 export type ReportFormat = "pdf" | "word" | "excel" | "markdown";
 
@@ -563,43 +613,47 @@ GET /api/reports/templates
             includes platform:* always + <vertical_id>:* if vertical_id provided
 ```
 
-Returns templates the user can pick. Frontend caches per-active-vertical for the session.
+Returns templates the user can pick. Frontend caches per-active-vertical for the session via Zustand store inside the hook.
 
 ---
 
-## §8 Composables
+## §8 Hooks
 
 ### 8.1 `useReportRender`
 
 ```typescript
-export function useReportRender(): {
+export interface UseReportRenderReturn {
   render(opts: { meeting_id: string; template_id: string; format: ReportFormat }): Promise<void>;
-  isRendering:  Ref<boolean>;
-  lastError:    Ref<string | null>;
-  lastBytes:    Ref<Blob | null>;
-};
+  isRendering:  boolean;
+  lastError:    string | null;
+  lastBytes:    Blob | null;
+}
+
+export function useReportRender(): UseReportRenderReturn;
 ```
 
-**Behavior.**
-1. POST `/api/reports/render` with the request body.
-2. On 200: read response as blob; trigger a download via `URL.createObjectURL(blob)` + temp `<a download>` click; `lastBytes = blob`.
-3. On 4xx / 5xx: parse error envelope; set `lastError` (localized from `feature.reports.error.*` per i18n §11).
-4. On `MeetingNotReady` (409 + Retry-After): show toast "Outcome not ready yet; try again in {seconds}s"; do NOT auto-retry.
+**Behavior.** Internal `useState` for `isRendering` / `lastError` / `lastBytes`.
+1. POST `/api/reports/render` with the request body via `fetch()`.
+2. On 200: read response as Blob; trigger a download via `URL.createObjectURL(blob)` + temp `<a download>` click + revoke URL after 1s; set `lastBytes`.
+3. On 4xx / 5xx: parse error envelope; set `lastError` (localized via `useI18n().t()` from `feature.reports.error.*`).
+4. On `MeetingNotReady` (409 + Retry-After): show toast via `useToast().show({severity:"warning", title:"feature.reports.error.not_ready", body:`...{{seconds}}s` })`; do NOT auto-retry.
 
 ### 8.2 `useReportTemplates`
 
 ```typescript
-export function useReportTemplates(): {
-  templates:    ComputedRef<ReportTemplate[]>;
-  isLoading:    ComputedRef<boolean>;
-  error:        ComputedRef<string | null>;
-};
+export interface UseReportTemplatesReturn {
+  templates:    ReportTemplate[];
+  isLoading:    boolean;
+  error:        string | null;
+}
+
+export function useReportTemplates(): UseReportTemplatesReturn;
 ```
 
 **Behavior.**
-1. On mount: read `useActiveVertical().active.value?.vertical_id`; GET `/api/reports/templates?vertical_id=...`.
-2. Result cached in a Pinia store keyed by vertical_id (so vertical switch invalidates).
-3. Re-fetch on vertical switch.
+1. On mount: read `useActiveVertical().active?.vertical_id`; call `fetch('/api/reports/templates?vertical_id=...')` inside a `useEffect`.
+2. Result cached in a tiny Zustand store keyed by `vertical_id` (so vertical switch invalidates).
+3. Re-fetch on vertical switch (hook re-runs on `useActiveVertical().active` change).
 
 ---
 
@@ -635,14 +689,14 @@ class RenderFailed(ReportsError):           ...   # 500  — renderer raised; ex
 | scenario | preconditions | expected | test_id |
 |---|---|---|---|
 | outcome loading | studio mock pending | spinner visible | `t_rv_loading` |
-| outcome ready (consensus) | mock returns OutcomeResponse with outcome | full UI rendered; preview shows Markdown | `t_rv_ready` |
+| outcome ready (consensus) | mock returns OutcomeResponse with outcome | full UI rendered; preview shows rendered Markdown via react-markdown | `t_rv_ready` |
 | outcome not ready | studio raises MeetingNotReady | placeholder + back link | `t_rv_not_ready` |
 | outcome failed | OutcomeResponse with outcome=null, error set | "meeting failed" placeholder | `t_rv_failed` |
 | outcome not found | studio raises NotFound | 404 page | `t_rv_not_found` |
-| template switch | user picks "default-summary" | preview re-renders with summary template | `t_rv_template_switch` |
+| template switch | user picks "default-summary" | preview re-renders with summary template (renderMarkdown re-called via React state change) | `t_rv_template_switch` |
 | format switch | user picks Word | export button label updates; preview unchanged | `t_rv_format_switch` |
-| export click triggers download | user clicks export | POST /render called; blob URL created; download attempted | `t_rv_export_download` |
-| copy-clipboard | user clicks copy | Markdown text on clipboard | `t_rv_copy_md` |
+| export click triggers download | user clicks export | POST /render called; Blob URL created; download attempted | `t_rv_export_download` |
+| copy-clipboard | user clicks copy | Markdown text on clipboard via navigator.clipboard.writeText | `t_rv_copy_md` |
 | copy-link | user clicks share-link | URL on clipboard | `t_rv_copy_link` |
 | forward-compat concluded_by | unknown enum value | gray chip with tooltip showing raw value | `t_rv_concluded_by_forward_compat` |
 | chip per concluded_by | each documented value | correct color per §4.1 | `t_rv_chip_colors` |
@@ -667,6 +721,8 @@ For each renderer (`pdf`, `word`, `excel`, `markdown`), 3 snapshot tests:
 
 **Cross-language parity** (Markdown only): `t_md_parity_client_server` — given the same fixture, client TS `renderMarkdown(...)` and server Python `render_markdown(...)` produce byte-identical output. Critical for preview-vs-export consistency.
 
+**Display test for `<RenderPreview>`**: `t_preview_renders_html` — given the Markdown text output, react-markdown renders an `<h1>` for `# title` etc. (separate from the parity test).
+
 ### 10.3 API endpoint tests
 
 | scenario | request | expected | test_id |
@@ -686,6 +742,8 @@ For each renderer (`pdf`, `word`, `excel`, `markdown`), 3 snapshot tests:
 
 ## §11 i18n
 
+Lives at `packages/platform-features/reports/src/i18n/{zh,en}.json`. Merged into i18next at feature load under namespace `feature.reports.*`. Interpolation uses `{{var}}`.
+
 ```json
 {
   "feature.reports.title": "Report",
@@ -693,6 +751,7 @@ For each renderer (`pdf`, `word`, `excel`, `markdown`), 3 snapshot tests:
   "feature.reports.outcome_not_ready": "Meeting still in progress; report becomes available when finalized.",
   "feature.reports.outcome_failed": "This meeting failed; no report available.",
   "feature.reports.back_to_meeting": "Back to meeting",
+  "feature.reports.template_not_available": "Template not available.",
 
   "feature.reports.section.consensus": "Consensus",
   "feature.reports.section.key_facts": "Key Facts",
@@ -714,14 +773,14 @@ For each renderer (`pdf`, `word`, `excel`, `markdown`), 3 snapshot tests:
 
   "feature.reports.template_picker": "Template",
   "feature.reports.format_picker": "Format",
-  "feature.reports.export_button": "Export {format}",
+  "feature.reports.export_button": "Export {{format}}",
   "feature.reports.copy_clipboard": "Copy as Markdown",
   "feature.reports.copy_link": "Copy report link",
 
   "feature.reports.error.template_not_found": "That template is not available.",
-  "feature.reports.error.render_failed":      "Could not render report ({renderer}). Try again.",
+  "feature.reports.error.render_failed":      "Could not render report ({{renderer}}). Try again.",
   "feature.reports.error.studio_unavailable": "Studio is unavailable. Try again shortly.",
-  "feature.reports.error.not_ready":          "Outcome not ready yet; try again in {seconds}s.",
+  "feature.reports.error.not_ready":          "Outcome not ready yet; try again in {{seconds}}s.",
 
   "feature.reports.audit.anchor_label":       "Audit anchor",
   "feature.reports.audit.rendered_at":        "Rendered at",
@@ -742,7 +801,7 @@ Per `01-studio-client-spec.md` §11.3: studio doesn't render reports. Even if it
 **Why server-side for binary formats (PDF / Word / Excel) but client-side for Markdown.**
 - Bundle size: jsPDF + docx.js + xlsx is ~600KB-1MB combined; that's expensive for every page load. Server has the libs already.
 - Determinism: server-side rendering is more reliable across browsers; binary file generation in browsers has known edge cases (font embedding, page breaks).
-- Markdown: trivial to render client-side (<100 LOC); avoids a network round trip for the always-on preview.
+- Markdown: trivial to render client-side text-wise (<100 LOC); display via `react-markdown` (already a dep from spec 05's MessageEmittedCard); avoids a network round trip for the always-on preview.
 *Considered and rejected.* **All client-side** — bundle bloat. **All server-side** — preview requires a round trip per template/format change; sluggish UX.
 
 **Why renderers are pure functions (no IO, no LLM).**
@@ -762,16 +821,20 @@ Prevents verticals from masquerading as platform templates. A future template ID
 *Considered and rejected.* **Flat IDs with `declared_by` field only** — IDs would collide; manifest validation gets harder.
 
 **Why the route lives at `/platform/reports/:meeting_id` and the bare `/platform/reports` redirects to knowledge.**
-Reports are meeting-bound; opening "reports" without context is meaningless. Knowledge is the natural place to discover past meetings; redirecting there is what users actually want.
+Reports are meeting-bound; opening "reports" without context is meaningless. Knowledge is the natural place to discover past meetings; redirecting there is what users actually want. React Router v6 supports this via a no-component route with a `loader: () => redirect(...)`.
 *Considered and rejected.* **`/platform/reports` shows a list of all reports** — duplicates knowledge browser; UX confusion about which is the "right" entry point.
 
-**Why Markdown preview is always rendered (even if user selects PDF).**
-The preview is for content; the format is for delivery. Letting users see what they'll get without an export round trip is the right preview tradeoff. Format-specific previews (literally rendering a PDF in browser) would re-introduce the bundle bloat we avoided.
-*Considered and rejected.* **Format-specific previews** — pulls in the binary-format libs we kept server-side.
+**Why Markdown preview uses `react-markdown` for display (vs raw `<pre>`).**
+The preview is for content; users want to see formatted text (headings, lists, tables), not raw `**bold**` syntax. `react-markdown` is already a dep (spec 05 uses it for utterances) — no new bundle cost. Format-specific previews (literally rendering a PDF in browser) would re-introduce the bundle bloat we avoided.
+*Considered and rejected.* **`<pre>` raw text** — defeats "preview" purpose. **Format-specific previews** — pulls in the binary-format libs we kept server-side.
 
-**Why client-server parity for the Markdown renderer is a hard test.**
-If the preview shows X but the exported Markdown shows Y, users lose trust. A snapshot test on a fixed fixture forces both implementations to evolve together.
+**Why client-server Markdown TEXT parity is a hard test.**
+If the preview shows X (rendered from client-generated MD text) but the exported Markdown file shows Y (server-generated MD text), users lose trust. A snapshot test on a fixed fixture forces both implementations to evolve together.
 *Considered and rejected.* **Two implementations free to drift** — likely subtle bugs.
+
+**Why `useReportRender` uses `fetch()` + Blob (not XHR).**
+Renders complete in seconds (server-side); progress tracking is unnecessary. `fetch()` + `response.blob()` + `URL.createObjectURL()` is the canonical modern download pattern; XHR is legacy. Spec 09 (uploads) does use XHR — but for legitimate upload progress tracking, not download.
+*Considered and rejected.* **XHR for downloads** — XHR for downloads has no progress benefit (server controls timing); modern fetch is cleaner.
 
 ---
 
@@ -779,11 +842,12 @@ If the preview shows X but the exported Markdown shows Y, users lose trust. A sn
 
 | Spec | Adjustment |
 |---|---|
-| `05-feature-agora-spec.md` | OutcomePanel "View report" emits `view-report-clicked`; AgoraView handles by `router.push('/platform/reports/' + meeting_id)`. Already reflected in 05 §11. |
+| `05-feature-agora-spec.md` | OutcomePanel "View report" calls `onViewReportClicked`; AgoraView handles by `navigate('/platform/reports/' + meeting_id)`. Already reflected in 05 §11. |
 | `07-feature-knowledge-spec.md` | Each completed meeting row links to `/platform/reports/<id>` via "Report" action. |
 | `13-vertical-template-spec.md` | Backend manifest's `report_templates: list[ReportTemplate]` field; validation rule that `template_id` prefix matches `declared_by`. |
 | `14-...` (first concrete vertical) | MAY ship vertical-specific templates; not required for v0.1 — verticals can ship none and rely on platform defaults. |
 | `15-apps-api-spec.md` | Mounts `/api/reports/*` router; loads server-side renderers (reportlab, python-docx, openpyxl) as Python deps; runs template-registry boot dance (§6.3); declares `meeting_metadata` is OUT of reports' scope (different table; reports doesn't store anything). |
+| `16-apps-frontend-spec.md` | `react-markdown` + `remark-gfm` already declared as deps for spec 05 (agora's MessageEmittedCard); reports re-uses them — no new dep. |
 | `17-substitution-tests-spec.md` | The Markdown parity test `t_md_parity_client_server` joins the substitution suite (cross-runtime parity, not pseudo↔http parity, but same discipline). |
 
 ---
@@ -791,20 +855,20 @@ If the preview shows X but the exported Markdown shows Y, users lose trust. A sn
 ## §14 Pre-merge checklist
 
 - [ ] Mission + Scope present; out-of-scope listed (caching, diff, sharing, scheduled, LaTeX, print-CSS, per-section permissions)
-- [ ] Module layout (§1) covers frontend feature + server-side renderer module
-- [ ] Permissions declared (§1.3) and route declared (§1.4)
+- [ ] Module layout (§1) covers frontend feature (.tsx files) + server-side renderer module (.py files)
+- [ ] Permissions declared (§1.3) and route declared (§1.4) using React Router v6 RouteObject + lazy() + makePermissionLoader
 - [ ] All 5 visual states (§2.2) documented
-- [ ] All 6 components (§4) have full TS prop / emit signatures, render rules, accessibility notes
+- [ ] All 6 components (§4) have full TS Props interface + onXxx callback props + render rules + accessibility notes
 - [ ] All 4 renderers (§5) have signatures + library choice + Why
-- [ ] Markdown client/server parity called out as critical (§5.5 + §10.2)
+- [ ] Markdown TEXT parity (client/server) called out as critical (§5.5 + §10.2); display in browser via react-markdown is a separate concern with its own test
 - [ ] Template interface (§6.1) + 2 platform default templates (§6.2) + per-vertical extension (§6.3) all defined
 - [ ] `POST /api/reports/render` (§7.1) + `GET /api/reports/templates` (§7.2) signatures complete with status codes + error mapping + MIME types
-- [ ] Composables (§8) signatures + behavior contracts
+- [ ] Hooks (§8) signatures + behavior contracts; useReportRender uses fetch+Blob pattern; useReportTemplates uses Zustand store for per-vertical cache
 - [ ] Sealed error taxonomy (§9): 2 leaves owned by reports + 8 delegated leaves named
-- [ ] Test matrix (§10): components (~14), renderer snapshots (~9), API (~10); ≥ 30 rows total
-- [ ] i18n keys (§11) for every user-visible string with en values
-- [ ] Why-this / why-not (§12) for ≥ 8 load-bearing decisions
-- [ ] Downstream impact (§13) lists every spec affected
+- [ ] Test matrix (§10): components (~14), renderer snapshots (~9 + parity + react-markdown display), API (~10); ≥ 30 rows total
+- [ ] i18n keys (§11) for every user-visible string with en values; interpolation uses `{{var}}` (i18next syntax)
+- [ ] Why-this / why-not (§12) for ≥ 8 load-bearing decisions including React-specific ones (react-markdown for preview display; fetch+Blob for download)
+- [ ] Downstream impact (§13) lists every spec affected; notes react-markdown is shared dep with spec 05
 - [ ] No business / domain / product / agent-role string literals (uses neutral `vertical-a`, fixture filenames)
 - [ ] No `from entelecheia` / `import entelecheia`
 - [ ] Renderers explicitly documented as pure functions; no LLM, no IO beyond input
