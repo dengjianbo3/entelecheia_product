@@ -980,6 +980,26 @@ Both templates registered with apps/api at boot (per `06` §6.3); appear in `<Te
 
 ---
 
+## §11b Test-ID contract (consumed by spec 18 e2e POM)
+
+Spec 18's scenarios 06 / 07 / 16 navigate this vertical's tabs and assert on table rows. Components MUST emit these `data-testid` attributes; the convention `vertical-{vertical_id}-{thing}` keeps the id namespace isolated so two verticals never collide.
+
+| `data-testid` | Owner component | Purpose | Required? |
+|---|---|---|---|
+| `vertical-investment-market-watch-row` (one per row, with `data-symbol={symbol}` as a sibling attribute for disambiguation) | `<MarketWatchTab>` watchlist row | scenario 06 prerequisite checks, scenario 16 prefill verify | required |
+| `vertical-investment-market-watch-add-symbol` | `<MarketWatchTab>` SymbolPicker submit button | targets the "Add a symbol" CTA | required |
+| `vertical-investment-portfolio-row` | `<PortfolioTab>` holdings row | future scenario coverage; scenario 06 add-to-portfolio path needs it | required |
+| `vertical-investment-portfolio-add-holding` | `<PortfolioTab>` Add holding button | scenario 06 add-to-portfolio handoff target | required |
+| `vertical-investment-market-summary-row` (one per index) | `<MarketSummaryWidget>` index row | dashboard widget visibility checks; scenario 18 for the widget surfacing | required |
+| `vertical-investment-financial-report-handler` | `<FinancialReportHandler>` outer container | scenario 07 verifies the vertical handler renders (not the platform fallback) | required |
+| `vertical-investment-business-plan-handler` | `<BusinessPlanHandler>` outer container | scenario 16 verifies handler picker preference | required |
+
+**Design rule (mirrors spec 05 §8b).** Templated values use the raw studio-provided id (here: ticker symbols + holding ids) verbatim. Renames are a contract change requiring a coordinated edit in spec 18.
+
+**Why "vertical-investment-" prefix.** The convention `vertical-{vertical_id}-{thing}` per `13-vertical-template-spec.md` §11.6 (the React component contract test row pattern). Two verticals in the same DOM never collide on test_ids.
+
+---
+
 ## §12 Test matrix (vertical-level)
 
 In addition to per-component / per-router test rows above, the vertical has these integration tests:

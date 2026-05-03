@@ -868,6 +868,28 @@ Every user-visible string introduced by agora. Lives at `packages/platform-featu
 
 ---
 
+## §8b Test-ID contract (consumed by spec 18 e2e POM)
+
+Spec 18's `pages/AgoraPage.ts` (Page Object Model in spec 18 §4) targets the agora UI via stable `data-testid` attributes. To keep the e2e suite from breaking on cosmetic changes (text rewording, locale switches, CSS-class refactors), this section declares the contract: **components in this package MUST emit these `data-testid` attributes; renames are a contract change requiring a coordinated edit in spec 18**.
+
+| `data-testid` | Owner component | Purpose | Required? |
+|---|---|---|---|
+| `agora-header` | `<AgoraView>` outer container or its `<header>` slot | locates the page title + breadcrumb area | required |
+| `agora-status-pill` | `<AgoraView>` status indicator | locates the running/completed/failed status pill (consumed by `waitUntilStatus()`) | required |
+| `agora-consensus-panel` | `<ConsensusPanel>` outer container | locates the consensus panel for assertions | required |
+| `agora-dag` | `<DagView>` root `<svg>` (or wrapper) | locates the DAG render | required |
+| `agora-cost-panel` | `<CostPanel>` outer container | locates the cost panel | required |
+| `event-card-claim-{claim_id}` | `<EventCard>` for `ClaimMade` events | per-claim card; consumed by `eventCardByClaimId()` and `waitForClaimEvent()` | required for `ClaimMade` cards |
+| `consensus-claim-{claim_id}` | `<ConsensusPanel>` per-claim row | per-claim consensus row; consumed by `waitForConsensus()` | required for each consensus entry |
+
+**Design rule for templated test_ids.** When a test_id contains a runtime substitution (e.g., `claim_id`), the value MUST be the raw studio-provided id, NOT a re-hash or sanitized form. The e2e helpers concat the id verbatim.
+
+**Why declare here (and not at every `data-testid` site).** Centralizing the contract lets reviewers verify additions/removals against spec 18 in one place. Per-component sprinkle would scatter the contract; readers wouldn't know which test_ids are observable surface vs internal.
+
+**Why "required" not "convention".** Spec 18 is the v0.1 acceptance gate. A missing test_id breaks an e2e scenario; the consistency-check CI job (per `00-consistency-report.md` §6) gates that demanded test_ids resolve to a declaration in some feature spec.
+
+---
+
 ## §9 Test matrix — top-level
 
 In addition to per-component test rows above, AgoraView has integration tests:
