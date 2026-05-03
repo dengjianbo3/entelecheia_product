@@ -327,7 +327,7 @@ Failed turns do NOT block subsequent turns; user sends another message and a new
 
 ## §4 Agent picker convention — UNCHANGED
 
-A project is "chat-eligible" when ALL of:
+A project is *chat-eligible* (descriptive category, not a project_id) when ALL of:
 1. `spec_id` matches `^chat-[a-z][a-z0-9_-]*$` (convention; v0.2 may switch to an explicit vertical-manifest field).
 2. `status === "published"`.
 3. Project is in active vertical's `default_project_filter.project_id_in`.

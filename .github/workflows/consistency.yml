@@ -1,0 +1,136 @@
+name: Consistency
+
+# Spec-only gate. Runs on PRs / pushes that touch docs/specs/v0.1/*.md
+# OR scripts/check-purity.sh OR this workflow itself. Complements ci.yml,
+# which deliberately skips on doc-only changes (see ci.yml paths-ignore).
+#
+# Catches the drift patterns documented in docs/specs/v0.1/00-consistency-report.md:
+#   F1/F2 — [SUB] inventory in spec 17 §4 vs grep over specs 01-16+18
+#   F3    — data-testid demanded by spec 18 vs declared in feature/vertical specs
+#   ad-hoc — ProjectSpec.spec_id references vs declared spec_ids in fixture overlays
+#
+# All three checks are pure shell + grep — no toolchain install, ~5s end-to-end.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "docs/specs/v0.1/**.md"
+      - "scripts/check-purity.sh"
+      - ".github/workflows/consistency.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs/specs/v0.1/**.md"
+      - "scripts/check-purity.sh"
+      - ".github/workflows/consistency.yml"
+
+jobs:
+  consistency-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # F1+F2: SUB inventory bidirectional — every [SUB] token in any spec
+      # must appear in spec 17 §4, and vice versa (modulo the documented
+      # wildcard exclusion at 12-feature-observability-spec.md:830).
+      - name: SUB inventory bidirectional
+        run: |
+          set -euo pipefail
+          # Specs declaring [SUB] tokens; exclude spec 17 + the wildcard line
+          grep -hoE '\[SUB\] (t_[a-z0-9_]+)' \
+            docs/specs/v0.1/01-*.md \
+            docs/specs/v0.1/01b-*.md \
+            docs/specs/v0.1/02-*.md \
+            docs/specs/v0.1/03-*.md \
+            docs/specs/v0.1/04-*.md \
+            docs/specs/v0.1/05-*.md \
+            docs/specs/v0.1/06-*.md \
+            docs/specs/v0.1/07-*.md \
+            docs/specs/v0.1/08-*.md \
+            docs/specs/v0.1/09-*.md \
+            docs/specs/v0.1/1[0-689]-*.md \
+            2>/dev/null | sed 's|\[SUB\] ||' | grep -v '^t_gcr_$' | sort -u > /tmp/in_specs.txt
+          # Spec 17 §4 inventory (only the §4.x subsections, not §11 runner self-tests)
+          sed -n '/^### §4\./,/^---/p' docs/specs/v0.1/17-substitution-tests-spec.md \
+            | grep -oE '`t_[a-z0-9_]+`' | tr -d '`' | sort -u > /tmp/in_17.txt
+          if ! diff -q /tmp/in_specs.txt /tmp/in_17.txt > /dev/null; then
+            echo "::error::SUB inventory drift between specs and 17 §4"
+            echo "in specs but missing from 17 §4:"
+            comm -23 /tmp/in_specs.txt /tmp/in_17.txt | sed 's/^/  - /'
+            echo "in 17 §4 but never declared in any spec:"
+            comm -13 /tmp/in_specs.txt /tmp/in_17.txt | sed 's/^/  - /'
+            echo ""
+            echo "Fix: regenerate 17 §4 from grep, OR add the missing [SUB] row to the owning spec."
+            echo "See docs/specs/v0.1/00-consistency-report.md §3 for context."
+            exit 1
+          fi
+          echo "SUB inventory OK ($(wc -l < /tmp/in_17.txt) rows)"
+
+      # F3: data-testid demanded by spec 18 POM must be declared in some
+      # feature/vertical spec (so reviewers can verify the contract).
+      - name: data-testid demands satisfied
+        run: |
+          set -euo pipefail
+          # Extract the literal data-testid strings spec 18 calls getByTestId on
+          # (only the static ones; templated like `event-card-claim-${id}` are excluded by the regex).
+          grep -oE 'getByTestId\("[a-z][a-z0-9-]+"\)' docs/specs/v0.1/18-end-to-end-scenarios-spec.md \
+            | grep -oE '"[^"]+"' | tr -d '"' | sort -u > /tmp/demanded.txt
+          if [ ! -s /tmp/demanded.txt ]; then
+            echo "WARN: no static getByTestId calls found in spec 18; skipping check"
+            exit 0
+          fi
+          missing=0
+          for tid in $(cat /tmp/demanded.txt); do
+            # Search across feature + vertical specs for the literal id (in backticks or quotes)
+            if ! grep -lE "[\`\"]${tid}[\`\"]" \
+                docs/specs/v0.1/0[5-9]-*.md \
+                docs/specs/v0.1/1[0-4]-*.md \
+                > /dev/null 2>&1; then
+              echo "::error::data-testid '${tid}' demanded by spec 18 but not declared in any feature/vertical spec"
+              missing=$((missing+1))
+            fi
+          done
+          if [ "$missing" -gt 0 ]; then
+            echo ""
+            echo "Fix: add the test_id to the owning feature/vertical spec's Test-ID contract section."
+            echo "See docs/specs/v0.1/00-consistency-report.md §4 + spec 05 §8b / spec 14 §11b for the template."
+            exit 1
+          fi
+          echo "data-testid demands OK ($(wc -l < /tmp/demanded.txt) ids verified)"
+
+      # Ad-hoc: ProjectSpec.spec_id references must resolve to a declared spec_id
+      # somewhere in a fixture overlay.
+      - name: ProjectSpec spec_id references resolve
+        run: |
+          set -euo pipefail
+          # Declared spec_ids (in fixture overlays — YAML literal `spec_id: <id>`)
+          grep -hoE 'spec_id: [a-zA-Z0-9_-]+' docs/specs/v0.1/*.md \
+            | awk '{print $2}' | sort -u > /tmp/declared.txt
+          # Referenced project_ids (rough — common prefixes from v0.1 fixtures)
+          grep -hoE '"(investment-[a-z-]+|chat-[a-z-]+|proj-[a-z-]+)"' docs/specs/v0.1/*.md \
+            | tr -d '"' | sort -u > /tmp/referenced.txt
+          missing=0
+          for ref in $(cat /tmp/referenced.txt); do
+            if ! grep -qFx "$ref" /tmp/declared.txt; then
+              echo "::error::project_id '${ref}' referenced but not declared in any fixture overlay"
+              missing=$((missing+1))
+            fi
+          done
+          if [ "$missing" -gt 0 ]; then
+            echo ""
+            echo "Fix: add a ProjectSpec entry under the appropriate vertical's fixture_overlay/projects.yaml,"
+            echo "or remove the stale reference."
+            exit 1
+          fi
+          echo "ProjectSpec references OK ($(wc -l < /tmp/referenced.txt) refs verified against $(wc -l < /tmp/declared.txt) declarations)"
+
+      # Sanity: spec count should be 20 (00 report + 01..18 + 01b)
+      - name: Spec inventory snapshot
+        run: |
+          count=$(ls docs/specs/v0.1/*.md | wc -l | tr -d ' ')
+          echo "v0.1 spec count: $count"
+          if [ "$count" -lt 20 ]; then
+            echo "::warning::spec count dropped below 20 — verify intentional"
+          fi
