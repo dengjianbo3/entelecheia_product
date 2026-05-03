@@ -948,7 +948,7 @@ Every public hook + every layout slot + every route loader has tests. All tests 
 | Vertical accent color | active vertical declares `accent_color` | `--color-accent` CSS var matches | `t_theme_vertical_accent` |
 | i18n locale switch | `useI18n().setLocale("zh")` | preferences PATCH; `t()` returns Chinese | `t_i18n_locale_switch` |
 | i18n missing key | `t("nonexistent.key")` | returns key in dev; logs warning | `t_i18n_missing_key` |
-| i18n vertical bundle | vertical merged keys | `t("vertical.v_a.tab.x")` returns vertical's value | `t_i18n_vertical_namespace` |
+| i18n vertical bundle | vertical merged keys | `t("vertical.v-a.tab.x")` returns vertical's value | `t_i18n_vertical_namespace` |
 
 ### Vertical extension
 
