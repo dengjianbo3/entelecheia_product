@@ -20,7 +20,7 @@ This file defines the **substitution test suite** — the runnable proof that th
 **Covers.**
 - The substitution test framework (`tests/substitution/runner/`): a Vitest harness that runs every `[SUB]` test twice — once with `VITE_STUDIO_CLIENT_MODE=pseudo` and once with `mode=http` (against a mocked-studio HTTP server).
 - 5 categories of substitution test (defined in §3); every `[SUB]` test in every prior spec maps to exactly one category.
-- The full inventory (§4) — every `[SUB]` test_id introduced by specs 01–16, with its category, source spec, and one-line description.
+- The full inventory (§4) — every `[SUB]` test_id introduced by specs 01–16 + 18 (85 rows as of v0.1; regenerated from grep, never hand-maintained), with its category, source spec, and one-line description.
 - Mocked-studio HTTP server contract (§5) — how the http-mode tests stand up a fake studio that obeys `01` §6 (the binding API).
 - Vertical install/uninstall harness (§6) — how a test toggles a vertical between "installed" and "uninstalled" without rebuilding the whole app.
 - Pass criteria (§7) — what "the suite is green" means; which conditions fail the build.
@@ -187,82 +187,147 @@ Each `[SUB]` test in this category installs a vertical's fixture overlay into ps
 
 ## §4 The full `[SUB]` inventory
 
-Source: every `[SUB]`-marked row from specs 01–16. Inventory is generated; this section is the human-readable mirror. Bold rows are the canonical "minimum substitution surface" — if these green, the binding works.
+> **Source-of-truth note**: this table is **regenerated** from `grep -hoE '\[SUB\] (t_[a-z0-9_]+)' docs/specs/v0.1/*.md` (excluding spec 17 itself + the wildcard reference at `12-feature-observability-spec.md:830`). The runner's `coverage.ts` (per §10) re-runs the same grep and fails CI if this table drifts. **Do not hand-add rows here** — add them to the owning spec's test matrix; this section auto-updates.
+>
+> Last regenerated: 2026-05-03 (consistency-report F1 / F2 remediation; replaces a hand-written first draft that fabricated 53 names + omitted 64 real ones + invented 2 non-existent Protocol methods).
 
-| # | test_id | source spec | category | description |
-|---:|---|---|---:|---|
-| 1 | **`t_lp_happy`** | 01 §7.1 | 1 | `list_projects` happy path |
-| 2 | `t_lp_studio_unavailable` | 01 §7.1 | 1 | `list_projects` raises `StudioUnavailable` on 502 |
-| 3 | `t_lp_auth_required` | 01 §7.1 | 1 | `list_projects` raises `AuthRequired` on 401 |
-| 4 | **`t_gp_happy`** | 01 §7.2 | 1 | `get_project` happy path |
-| 5 | `t_gp_not_found` | 01 §7.2 | 1 | `get_project` raises `ProjectNotFound` |
-| 6 | **`t_gpv_happy`** | 01 §7.3 | 1 | `get_project_version` returns DTO matching pinned version |
-| 7 | `t_gpv_version_unknown` | 01 §7.3 | 1 | unknown version → `VersionNotFound` |
-| 8 | **`t_rm_happy`** | 01 §7.4 | 1 | `run_meeting` returns started `meeting_id` |
-| 9 | `t_rm_quota` | 01 §7.4 | 3 | `RateLimited` taxonomy leaf surfaces |
-| 10 | `t_rm_invalid_topic` | 01 §7.4 | 3 | `InvalidArgument` leaf |
-| 11 | `t_rm_constraint_violation` | 01 §7.4 | 3 | `ConstraintViolation` leaf |
-| 12 | **`t_sm_happy`** | 01 §7.5 | 2 | `subscribe_meeting` streams events in seq_no order |
-| 13 | `t_sm_reconnect` | 01 §7.5 | 2 | reconnect via last_seq_no produces no-loss/no-dup |
-| 14 | `t_sm_unknown_event` | 01 §7.5 | 2 | forward-compat unknown event passes through |
-| 15 | `t_sm_late_finalized` | 01 §7.5 | 2 | late `meeting_finalized` freezes the stream |
-| 16 | `t_sm_integrity_incident` | 01 §7.5 | 3 | `IntegrityError` leaf surfaces |
-| 17 | **`t_lm_happy`** | 01 §7.6 | 1 | `list_meetings` paginates correctly |
-| 18 | `t_lm_filters` | 01 §7.6 | 1 | filters (project_id, status, since/until) honored |
-| 19 | **`t_gms_happy`** | 01 §7.7 | 1 | `get_meeting_status` returns DTO incl. error_class for failed |
-| 20 | **`t_gmo_happy`** | 01 §7.8 | 1 | `get_meeting_outcome` returns full MeetingOutcome |
-| 21 | `t_gmo_not_finalized` | 01 §7.8 | 3 | `OutcomeNotReady` leaf when meeting still running |
-| 22 | **`t_le_happy`** | 01 §7.9 | 1 | `list_evidence` returns evidence with citations |
-| 23 | **`t_gcr_happy`** | 01 §7.10 | 1 | `get_cost_report` returns CostReport (no group_by) |
-| 24 | `t_gcr_grouped` | 01 §7.10 | 1 | get_cost_report with group_by=[model_id] returns rows |
-| 25 | `t_gcr_filters` | 01 §7.10 | 1 | get_cost_report filters honored |
-| 26 | **`t_h_happy`** | 01 §7.11 | 1 | `health` returns live + ready |
-| 27 | `t_h_degraded` | 01 §7.11 | 1 | live=true, ready=false → degraded |
-| 28 | `t_h_down` | 01 §7.11 | 1 | health unreachable → null |
-| 29 | `t_use_studio_returns_client` | 02 §11 hooks | 1 | `useStudio()` returns the configured client at boot |
-| 30 | `t_use_studio_health_poll` | 02 §11 hooks | 2 | `useStudioHealth({poll_interval_ms: 100})` polls 3 times in 350 ms |
-| 31 | `t_use_studio_health_error` | 02 §11 hooks | 3 | health poll raises `StudioUnavailable` → error set, prior retained |
-| 32 | `t_boot_happy` | 02 §11 boot | 1 | full boot completes against pseudo + against http |
-| 33 | `t_boot_studio_unreachable` | 02 §11 boot | 3 | studio unreachable at boot → shell renders, indicator red |
-| 34 | `t_meeting_stream_subscribe` | 01b §3 | 2 | useMeetingStream subscribes + receives ordered events |
-| 35 | `t_meeting_stream_refcount` | 01b §3 | 2 | two consumers refcount up; cleanup on last unsubscribe |
-| 36 | `t_outcome_reducer_consensus` | 01b §4.1 | 2 | useOutcomeReducer folds ConsensusReached correctly |
-| 37 | `t_dag_state_claim_added` | 01b §4.2 | 2 | useDagState adds nodes on ClaimMade |
-| 38 | `t_cost_state_message_emitted` | 01b §4.3 | 2 | useCostState increments tokens on MessageEmitted |
-| 39 | `t_provenance_evidence_cited` | 01b §4.4 | 2 | useProvenance records EvidenceCited |
-| 40 | `t_agora_open_meeting` | 05 | 1 | opening a meeting URL fetches status + outcome + subscribes stream |
-| 41 | `t_agora_consensus_reached` | 05 | 2 | ConsensusReached event updates ConsensusPanel |
-| 42 | `t_reports_render_pdf` | 06 | 1 | request PDF render → arrives via fetch+Blob; metadata correct |
-| 43 | `t_knowledge_search_paginates` | 07 | 1 | knowledge browser paginates list_meetings |
-| 44 | `t_chathub_one_turn` | 08 | 1+2 | one chat turn = one short meeting; events stream + outcome surface |
-| 45 | `t_uploads_post_normalized` | 09 | 1 | upload preview → normalize → wizard inlines as Material content |
-| 46 | `t_wizard_run_meeting` | 10 | 1 | wizard step Submit calls run_meeting + navigates to /agora/<id> |
-| 47 | `t_settings_password_change` | 11 | 3 | invalid_current_password leaf surfaces with localized message |
-| 48 | `t_obs_cost_report_grouped` | 12 | 1 | observability cost panel renders get_cost_report result |
-| 49 | `t_obs_meeting_volume_paginated` | 12 | 1 | activity panel paginates list_meetings until empty |
-| 50 | `t_vt_boot_load` | 13 §11.1 | 4 | vertical loads at boot |
-| 51 | `t_vt_absent_isolated` | 13 §11.1 | 4 | absent vertical leaves rest functional |
-| 52 | `t_vt_two_coexist` | 13 §11.1 | 4 | two verticals coexist |
-| 53 | `t_vt_malformed_isolated` | 13 §11.1 | 4 | malformed manifest does not crash boot |
-| 54 | `t_vt_frontend_import_fail` | 13 §11.1 | 4 | failed dynamic import isolated |
-| 55 | `t_vt_fixture_load` | 13 §11.3 | 5 | fixture overlay loads into PseudoStudioClient |
-| 56 | `t_vt_fixture_meeting` | 13 §11.3 | 5 | fixture's meeting_template fires on run_meeting |
-| 57 | `t_vt_fixture_outcome` | 13 §11.3 | 5 | fixture outcome resolves through get_meeting_outcome |
-| 58 | `t_inv_boot_load` | 14 §12 | 4 | investment vertical loads at apps/api boot |
-| 59 | `t_inv_coexist_with_other` | 14 §12 | 4 | investment coexists with another vertical |
-| 60 | `t_inv_remove_isolated` | 14 §12 | 4 | uninstalling investment leaves rest intact |
-| 61 | `t_apps_fe_boot_one_vertical` | 16 §9.1 | 1 | apps/frontend boots with 1 vertical against pseudo + http |
-| 62 | `t_apps_fe_boot_two_verticals` | 16 §9.1 | 4 | apps/frontend boots with 2 verticals |
-| 63 | `t_apps_fe_pseudo_full_path` | 16 §9.6 | 1 | apps/frontend in pseudo mode runs a full meeting flow |
-| 64 | `t_apps_fe_http_full_path` | 16 §9.6 | 1 | apps/frontend in http mode runs the same flow |
+Bold rows = the **canonical minimum substitution surface**: one happy-path per Protocol method + the swap-mode flips + the boot/full-path proofs. If only these green, the binding holds at the contract level.
 
-**Inventory invariants** (enforced by `coverage.ts`):
-- Every `[SUB]` test_id mentioned in any spec under specs 01–16 appears in this table.
-- Every Protocol method in `01` §7 has at least one row.
-- Every error taxonomy leaf in `01` §8 has at least one Category-3 row.
-- Every spec listed in §11 of any feature spec ("Downstream impact") that lists `[SUB]` rows produces at least one row here.
+### §4.1 Category 1 — Protocol method happy paths + happy variants (33 rows)
+
+| # | test_id | source spec | description |
+|---:|---|---|---|
+| 1 | **`t_lp_default`** | 01 §7.1 | `list_projects` happy: published summaries |
+| 2 | `t_lp_archived` | 01 §7.1 | `list_projects` filters to archived when asked |
+| 3 | `t_lp_paging` | 01 §7.1 | `list_projects` paging non-overlapping |
+| 4 | **`t_gp_latest`** | 01 §7.2 | `get_project` returns latest published |
+| 5 | `t_gp_pinned` | 01 §7.2 | `get_project(version=N)` returns that version |
+| 6 | **`t_la_default`** | 01 §7.3 | `list_agents` happy: published agents |
+| 7 | `t_la_paging` | 01 §7.3 | `list_agents` paging |
+| 8 | **`t_ga_latest`** | 01 §7.4 | `get_agent` returns latest published |
+| 9 | `t_ga_pinned` | 01 §7.4 | `get_agent(version=N)` returns that version |
+| 10 | **`t_rm_happy`** | 01 §7.5 | `run_meeting` returns running `MeetingHandle` |
+| 11 | `t_rm_pinned_version` | 01 §7.5 | `run_meeting(project_version=N)` honored |
+| 12 | **`t_lm_by_project`** | 01 §7.6 | `list_meetings` filters by project_id |
+| 13 | `t_lm_by_status` | 01 §7.6 | `list_meetings` filters by status |
+| 14 | `t_lm_since` | 01 §7.6 | `list_meetings` filters by since |
+| 15 | `t_lm_paging` | 01 §7.6 | `list_meetings` paging |
+| 16 | `t_gms_running` | 01 §7.7 | `get_meeting_status` for running meeting |
+| 17 | **`t_gms_completed`** | 01 §7.7 | `get_meeting_status` for completed meeting |
+| 18 | `t_gms_failed` | 01 §7.7 | `get_meeting_status` returns error_class for failed |
+| 19 | **`t_gmo_completed`** | 01 §7.9 | `get_meeting_outcome` returns full MeetingOutcome |
+| 20 | `t_gmo_failed` | 01 §7.9 | `get_meeting_outcome` returns failed envelope |
+| 21 | **`t_gcr_project`** | 01 §7.10 | `get_cost_report` filtered to project |
+| 22 | `t_gcr_meeting` | 01 §7.10 | `get_cost_report` filtered to meeting |
+| 23 | `t_gcr_group_user` | 01 §7.10 | `get_cost_report` group_by=[user_id] |
+| 24 | `t_gcr_group_multi` | 01 §7.10 | `get_cost_report` group_by=[project_id, model_id] |
+| 25 | `t_gcr_empty` | 01 §7.10 | `get_cost_report` empty result envelope |
+| 26 | **`t_gsh_healthy`** | 01 §7.11 | `get_studio_health` live+ready |
+| 27 | `t_gsh_live_not_ready` | 01 §7.11 | live=true, ready=false (no exception) |
+| 28 | `t_gsh_version_drift` | 01 §7.11 | api_contract drift returns; checked per §10.8 |
+| 29 | `t_use_studio_returns_client` | 02 §11 | `useStudio()` returns configured client at boot |
+| 30 | `t_use_studio_health_poll` | 02 §11 | `useStudioHealth` polls 3× in 350 ms |
+| 31 | `t_boot_happy` | 02 §11 | full shell boot completes |
+| 32 | **`t_studio_swap_pseudo`** | 15 §… | `STUDIO_MODE=pseudo` instantiates PseudoStudioClient |
+| 33 | **`t_studio_swap_http_v01_stub`** | 15 §… | `STUDIO_MODE=http` constructs HttpStudioClient (or raises NotImplementedError per 01 §9 v0.1 stub) |
+
+### §4.2 Category 2 — Meeting event stream + reducer parity (17 rows)
+
+| # | test_id | source spec | description |
+|---:|---|---|---|
+| 34 | **`t_sm_from_start`** | 01 §7.8 | `subscribe_meeting` yields events from id=1 in order |
+| 35 | `t_sm_from_cursor` | 01 §7.8 | `subscribe_meeting(last_event_id=N)` yields `event_id ≥ N+1` |
+| 36 | `t_sm_reconnect_dedup` | 01 §7.8 | reconnect-at-cursor yields no duplicates |
+| 37 | `t_sm_finalized` | 01 §7.8 | iterator yields `meeting_finalized` then ends |
+| 38 | `t_sm_failed_terminates` | 01 §7.8 | iterator yields `meeting_failed` then ends |
+| 39 | `t_sm_heartbeat_strip` | 01 §7.8 | `: keepalive` lines not yielded |
+| 40 | `t_sm_unknown_type_forward_compat` | 01 §7.8 | unknown `event_type` yielded as-is for log-and-skip |
+| 41 | **`t_mss_first_subscribe_live`** | 01b §3 | `useMeetingStream` first subscribe → live status |
+| 42 | `t_mss_first_subscribe_completed` | 01b §3 | first subscribe to completed meeting fills from id=0 |
+| 43 | `t_mss_late_join` | 01b §3 | second consumer shares the same `state.events` |
+| 44 | `t_mss_transient_drop` | 01b §3 | drop → backoff → live; no duplicates |
+| 45 | `t_mss_finalized` | 01b §3 | `meeting_finalized` populates `finalized_outcome` |
+| 46 | `t_mss_meeting_id_change` | 01b §3 | prop change unsubs old / subs new |
+| 47 | `t_mss_refcount_close` | 01b §3 | last unmount closes underlying subscription |
+| 48 | `t_av_forward_compat_event` | 05 §… | DiscussionStream renders generic card on unknown EventType |
+| 49 | `t_ep_sse_live` | 15 §… | `GET /api/meetings/:id/events` SSE stream live |
+| 50 | `t_ep_sse_reconnect` | 15 §… | SSE proxy resumes from `Last-Event-Id` |
+
+### §4.3 Category 3 — Error taxonomy leaves (20 rows)
+
+Each row forces an error leaf in pseudo + http and asserts the same `StudioError` subclass + `error.kind` + `error.context` + UI message key.
+
+| # | test_id | source spec | leaf raised |
+|---:|---|---|---|
+| 51 | `t_lp_invalid_limit` | 01 §7.1 | `InvalidArgument` |
+| 52 | `t_lp_studio_down` | 01 §7.1 | `StudioUnavailable` |
+| 53 | `t_gp_not_found` | 01 §7.2 | `NotFound` (mapped from `SpecNotFoundError`) |
+| 54 | `t_gp_version_not_found` | 01 §7.2 | `NotFound` (mapped from `VersionNotFoundError`) |
+| 55 | `t_gp_invalid_version` | 01 §7.2 | `InvalidArgument` |
+| 56 | `t_la_invalid_limit` | 01 §7.3 | `InvalidArgument` |
+| 57 | `t_ga_not_found` | 01 §7.4 | `NotFound` |
+| 58 | `t_rm_not_found` | 01 §7.5 | `NotFound` |
+| 59 | `t_rm_not_published` | 01 §7.5 | `PublishValidation` (mapped from `PublishValidationError`) |
+| 60 | `t_rm_empty_topic` | 01 §7.5 | `InvalidArgument` |
+| 61 | `t_gms_not_found` | 01 §7.7 | `NotFound` |
+| 62 | `t_sm_not_found` | 01 §7.8 | `NotFound` |
+| 63 | `t_gmo_running` | 01 §7.9 | `MeetingNotReady` |
+| 64 | `t_gmo_not_found` | 01 §7.9 | `NotFound` |
+| 65 | `t_gcr_invalid_group` | 01 §7.10 | `InvalidArgument` |
+| 66 | `t_gsh_down` | 01 §7.11 | `StudioUnavailable` |
+| 67 | `t_mss_failed` | 01b §3 | `meeting_failed` event → state.failure_reason |
+| 68 | `t_mss_cursor_lost` | 01b §3 | reconnect raises `StreamUnavailable`; `forceFullReload()` recovers |
+| 69 | `t_use_studio_health_error` | 02 §11 | health poll raises `StudioUnavailable`; prior `health` retained |
+| 70 | `t_boot_studio_unreachable` | 02 §11 | studio unreachable at boot → shell renders, indicator red |
+
+### §4.4 Category 4 — Vertical isolation (9 rows)
+
+| # | test_id | source spec | description |
+|---:|---|---|---|
+| 71 | **`t_vt_boot_load`** | 13 §11.1 | vertical loads at apps/api boot via entry point |
+| 72 | `t_vt_absent_isolated` | 13 §11.1 | absent vertical → rest of platform unaffected |
+| 73 | `t_vt_two_coexist` | 13 §11.1 | two verticals coexist; tabs/widgets/fixtures don't collide |
+| 74 | `t_vt_malformed_isolated` | 13 §11.1 | malformed manifest → logged + skipped; rest boots |
+| 75 | `t_vt_frontend_import_fail` | 13 §11.1 | dynamic-import reject → toast + skip; other verticals load |
+| 76 | **`t_inv_boot_load`** | 14 §12 | investment vertical loads at boot |
+| 77 | `t_inv_coexist_with_other` | 14 §12 | investment coexists with another vertical |
+| 78 | `t_inv_remove_isolated` | 14 §12 | uninstalling investment leaves rest intact |
+| 79 | `t_apps_fe_boot_two_verticals` | 16 §9.1 | apps/frontend boots with 2 verticals registered |
+
+### §4.5 Category 5 — Fixture parity (6 rows)
+
+Each row installs a vertical's fixture overlay into pseudo AND seeds the mock studio with equivalent http-shaped data, then asserts the same UI flow produces identical outcomes.
+
+| # | test_id | source spec | description |
+|---:|---|---|---|
+| 80 | `t_vt_fixture_load` | 13 §11.3 | overlay's `proj-template-alpha` appears in `list_projects` |
+| 81 | `t_vt_fixture_meeting` | 13 §11.3 | overlay's `meeting_template` fires on `run_meeting` |
+| 82 | `t_vt_fixture_outcome` | 13 §11.3 | overlay's outcome resolves via `get_meeting_outcome` |
+| 83 | `t_apps_fe_boot_one_vertical` | 16 §9.1 | apps/frontend boots with 1 vertical against both modes |
+| 84 | **`t_apps_fe_pseudo_full_path`** | 16 §9.6 | full meeting flow against pseudo+fixtures |
+| 85 | **`t_apps_fe_http_full_path`** | 16 §9.6 | identical full meeting flow against mock studio over SSE |
+
+---
+
+### §4.6 Inventory invariants (enforced by `coverage.ts`)
+
+- Every `[SUB]` test_id mentioned in any spec under specs 01–16 + 18 appears in this table — and vice versa.
+- Every Protocol method in `01` §7 (11 methods) has at least one row in §4.1.
+- Every error taxonomy leaf in `01` §8 has at least one row in §4.3.
+- The wildcard reference `[SUB] t_gcr_*` at `12-feature-observability-spec.md:830` is treated as **prose** (a pattern reference, not a declaration) and is excluded by the grep that drives `coverage.ts`.
 
 If a row appears in a feature spec but is missing from this inventory (or vice versa), the runner's coverage step (per §10) fails CI.
+
+**Coverage statistics (current snapshot)**:
+
+| category | rows | scope |
+|---|---:|---|
+| 1 — Protocol method happy paths | 33 | 11 methods × 1-5 happy variants + 5 cross-cutting |
+| 2 — Event stream + reducer parity | 17 | subscribe_meeting + 7 mss reducer states + 1 forward-compat + 2 SSE-proxy |
+| 3 — Error taxonomy leaves | 20 | each leaf in 01 §8 covered |
+| 4 — Vertical isolation | 9 | template (5) + investment (3) + apps/frontend multi-vertical (1) |
+| 5 — Fixture parity | 6 | template overlay (3) + apps/frontend full-path × both modes (3) |
+| **total** | **85** | |
 
 ---
 
@@ -528,7 +593,7 @@ It depends on every package; placing it under packages/ would require declaring 
 - [ ] Module layout (§1) shows `tests/substitution/` as top-level dir with runner / inventory / fixtures / integration / vitest config
 - [ ] Runner (§2) iterates each `[SUB]` test under both modes + a third diff assertion
 - [ ] 5 categories (§3) defined exhaustively + disjointly; each maps every existing `[SUB]` row to exactly one
-- [ ] Inventory (§4) lists all 60+ `[SUB]` rows from specs 01–16; each row has id / source / category / description; bold rows = canonical minimum
+- [ ] Inventory (§4) lists all 85 `[SUB]` rows from specs 01–16 + 18 (regenerated from grep per §4 source-of-truth note; never hand-maintained); each row has id / source / category / description; bold rows = canonical minimum
 - [ ] Mocked-studio server (§5) is msw-node based; obeys `01` §6 binding; deterministic event scripts
 - [ ] Vertical toggle (§6) uses production discoverAndRegisterVerticals path
 - [ ] Pass criteria (§7) explicit + 4 conditions enumerated
